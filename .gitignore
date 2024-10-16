@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+# Project Executable
+db
+
+# Project Datafiles
+dbfile.bin
