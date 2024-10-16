@@ -36,3 +36,4 @@ db
 
 # Project Datafiles
 dbfile.bin
+*.tab

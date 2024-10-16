@@ -56,6 +56,18 @@ typedef struct t_list
 	struct t_list *next;
 } token_list;
 
+
+/* This struct is use to store table headers */
+typedef struct tab_file_header_def
+{
+	int file_size;
+	int record_size;
+	int num_records;
+	int record_offset;
+	int file_header_flag;
+	tpd_entry *tpd_ptr;
+} table_file_header;
+
 /* This enum defines the different classes of tokens for 
 	 semantic processing. */
 typedef enum t_class
@@ -65,7 +77,7 @@ typedef enum t_class
 	symbol, 		// 3
 	type_name,		// 4
 	constant,		// 5
-  function_name,	// 6
+  	function_name,	// 6
 	terminator,		// 7
 	error			// 8
 } token_class;
@@ -192,10 +204,12 @@ typedef enum error_return_codes
 	INVALID_COLUMN_DEFINITION,		// -390
 	INVALID_COLUMN_LENGTH,			// -389
   	INVALID_REPORT_FILE_NAME,		// -388
-  /* Must add all the possible errors from I/U/D + SELECT here */
+  	/* Must add all the possible errors from I/U/D + SELECT here */
 	FILE_OPEN_ERROR = -299,			// -299
 	DBFILE_CORRUPTION,				// -298
-	MEMORY_ERROR					// -297
+	MEMORY_ERROR,					// -297
+	STRING_TOO_LONG = -1999,
+	TYPE_MISMATCH = -1899
 } return_codes;
 
 /* Set of function prototypes */
@@ -207,6 +221,10 @@ int sem_create_table(token_list *t_list);
 int sem_drop_table(token_list *t_list);
 int sem_list_tables();
 int sem_list_schema(token_list *t_list);
+int sem_insert_row(token_list *t_list);
+int sem_select_query_handler(token_list *t_list);
+int create_tab_file(tpd_entry *tpd);
+int print_tab_file(char *table_name);
 
 /*
 	Keep a global list of tpd - in real life, this will be stored
