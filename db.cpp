@@ -438,7 +438,7 @@ int sem_create_table(token_list *t_list){
 						int i;
 						for(i = 0; i < cur_id; i++)
 						{
-              /* make column name case sensitive */
+              				/* make column name case sensitive */
 							if (strcmp(col_entry[i].col_name, cur->tok_string)==0)
 							{
 								rc = DUPLICATE_COLUMN_NAME;
@@ -1391,7 +1391,7 @@ int sem_select_query_handler(token_list *t_list){
 	char table_name[MAX_IDENT_LEN];
     char *columns[MAX_NUM_COL];
     int num_columns;
-    int rc;
+	int rc;
 
     // Parse the table and column names
     rc = parse_table_and_columns(t_list, table_name, columns, &num_columns);
@@ -1507,41 +1507,90 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
 }
 
 int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int *num_columns) {
-    *num_columns = 0;
+    tpd_entry *tab_entry = NULL;
+	cd_entry *col_entry = NULL;
+
+	int rc =0;
 
     // Step 1: Parse column names (until reaching "FROM")
-    while (tok_ptr && tok_ptr->tok_value != K_FROM) {
-        if (tok_ptr->tok_value == IDENT) {
-            // Allocate space for column name and copy it
-            columns[*num_columns] = (char *)malloc(MAX_IDENT_LEN);
-            if (!columns[*num_columns]) {
-                perror("Memory allocation failed for column name");
-                return MEMORY_ERROR;
-            }
-            strncpy(columns[*num_columns], tok_ptr->tok_string, MAX_IDENT_LEN);
-            (*num_columns)++;
-        }
+	if (tok_ptr && tok_ptr -> tok_value == S_STAR){
+		// Step 1 a: If Select ALL (*)
 
-        // Move to the next token (expect a comma or "FROM")
-        tok_ptr = tok_ptr->next;
-        if (tok_ptr && tok_ptr->tok_value == S_COMMA) {
-            tok_ptr = tok_ptr->next;  // Skip comma
-        }
-    }
+		// Check if next token is KEYWORD FROM
+		tok_ptr = tok_ptr->next;
+		if (tok_ptr && tok_ptr->tok_value != K_FROM){
+			perror("Syntax error: Expected 'FROM' keyword");
+        	return INVALID_STATEMENT;
+		}
+		// Check if next token is IDENTIFIER <table_name>
+		tok_ptr = tok_ptr->next;
+		if (tok_ptr && tok_ptr->tok_value != IDENT){
+			perror("Syntax error: Expected <table_name> Identifier after FROM keyword");
+        	return INVALID_STATEMENT;
+		}
 
-    // Step 2: Parse the "FROM" keyword
-    if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
-        perror("Syntax error: Expected 'FROM' keyword");
-        return INVALID_STATEMENT;
-    }
-    tok_ptr = tok_ptr->next;
+		// copy Table name in table_name pointer
+		strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-    // Step 3: Parse table name
-    if (!tok_ptr || tok_ptr->tok_value != IDENT) {
-        perror("Syntax error: Expected table name after 'FROM'");
-        return INVALID_STATEMENT;
-    }
-    strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
+		// Access table schema and fetch all columns
+		tab_entry = get_tpd_from_list(table_name);
+
+		if (!tab_entry){
+			printf("Error: Table %s does not exist.\n", table_name);
+			return TABLE_NOT_EXIST;
+		}
+
+		// Get list of columns from the schema
+		*num_columns = tab_entry->num_columns;
+
+		int i=0;
+		for(i = 0, col_entry = (cd_entry*)((char*)tab_entry + tab_entry->cd_offset);
+								i <= tab_entry->num_columns; i++, col_entry++)
+		{
+			// Access column names by col_entry->col_name
+			columns[i] = (char *)malloc(MAX_IDENT_LEN);
+			if (!columns[i]) {
+				perror("Memory allocation failed for column name");
+				return MEMORY_ERROR;
+			}
+			strncpy(columns[i], col_entry->col_name, MAX_IDENT_LEN);
+		}
+
+	}else{		
+		// Step 1 b: If Select column
+		while (tok_ptr && tok_ptr->tok_value != K_FROM) {
+			if (tok_ptr->tok_value == IDENT) {
+				// Allocate space for column name and copy it
+				columns[*num_columns] = (char *)malloc(MAX_IDENT_LEN);
+				if (!columns[*num_columns]) {
+					perror("Memory allocation failed for column name");
+					return MEMORY_ERROR;
+				}
+				strncpy(columns[*num_columns], tok_ptr->tok_string, MAX_IDENT_LEN);
+				(*num_columns)++;
+			}
+
+			// Move to the next token (expect a comma or "FROM")
+			tok_ptr = tok_ptr->next;
+			if (tok_ptr && tok_ptr->tok_value == S_COMMA) {
+				tok_ptr = tok_ptr->next;  // Skip comma
+			}
+
+			// Step 2: Parse the "FROM" keyword
+			if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
+				perror("Syntax error: Expected 'FROM' keyword");
+				return INVALID_STATEMENT;
+			}
+			tok_ptr = tok_ptr->next;
+
+			// Step 3: Parse table name
+			if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+				perror("Syntax error: Expected table name after 'FROM'");
+				return INVALID_STATEMENT;
+			}
+			strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
+		}
+	}
 
     return 0;
 }
