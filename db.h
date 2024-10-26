@@ -222,9 +222,11 @@ int sem_drop_table(token_list *t_list);
 int sem_list_tables();
 int sem_list_schema(token_list *t_list);
 int sem_insert_row(token_list *t_list);
-int sem_select_query_handler(token_list *t_list);
 int create_tab_file(tpd_entry *tpd);
 int print_tab_file(char *table_name);
+int select_from_table(char* table_name, char** columns, int num_columns_to_select);
+int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int *num_columns);
+int sem_select_query_handler(token_list *t_list);
 
 /*
 	Keep a global list of tpd - in real life, this will be stored

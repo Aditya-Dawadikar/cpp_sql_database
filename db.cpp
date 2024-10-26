@@ -14,8 +14,7 @@
 #define strcasecmp _stricmp
 #endif
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv){
 	int rc = 0;
 	token_list *tok_list=NULL, *tok_ptr=NULL, *tmp_tok_ptr=NULL;
 
@@ -84,8 +83,7 @@ int main(int argc, char** argv)
 /************************************************************* 
 	This is a lexical analyzer for simple SQL statements
  *************************************************************/
-int get_token(char* command, token_list** tok_list)
-{
+int get_token(char* command, token_list** tok_list){
 	int rc=0,i,j;
 	char *start, *cur, temp_string[MAX_TOK_LEN];
 	bool done = false;
@@ -162,7 +160,7 @@ int get_token(char* command, token_list** tok_list)
 
 				if (!*cur)
 				{
-					add_to_list(tok_list, "", terminator, EOC);
+					add_to_list(tok_list, (char *) "", terminator, EOC);
 					done = true;
 				}
 			}
@@ -192,7 +190,7 @@ int get_token(char* command, token_list** tok_list)
 
 				if (!*cur)
 				{
-					add_to_list(tok_list, "", terminator, EOC);
+					add_to_list(tok_list, (char *)"", terminator, EOC);
 					done = true;
 				}
 			}
@@ -219,7 +217,7 @@ int get_token(char* command, token_list** tok_list)
 
 			if (!*cur)
 			{
-				add_to_list(tok_list, "", terminator, EOC);
+				add_to_list(tok_list, (char *)"", terminator, EOC);
 				done = true;
 			}
 		}
@@ -249,7 +247,7 @@ int get_token(char* command, token_list** tok_list)
 				cur++;
 				if (!*cur)
 				{
-					add_to_list(tok_list, "", terminator, EOC);
+					add_to_list(tok_list, (char *)"", terminator, EOC);
 					done = true;
 				}
 			}
@@ -258,7 +256,7 @@ int get_token(char* command, token_list** tok_list)
 		{
 			if (!*cur)
 			{
-				add_to_list(tok_list, "", terminator, EOC);
+				add_to_list(tok_list, (char*)"", terminator, EOC);
 				done = true;
 			}
 			else
@@ -275,8 +273,7 @@ int get_token(char* command, token_list** tok_list)
   return rc;
 }
 
-void add_to_list(token_list **tok_list, char *tmp, int t_class, int t_value)
-{
+void add_to_list(token_list **tok_list, char *tmp, int t_class, int t_value){
 	token_list *cur = *tok_list;
 	token_list *ptr = NULL;
 
@@ -300,8 +297,7 @@ void add_to_list(token_list **tok_list, char *tmp, int t_class, int t_value)
 	return;
 }
 
-int do_semantic(token_list *tok_list)
-{
+int do_semantic(token_list *tok_list){
 	int rc = 0, cur_cmd = INVALID_STATEMENT;
 	bool unique = false;
   	token_list *cur = tok_list;
@@ -341,6 +337,13 @@ int do_semantic(token_list *tok_list)
 		cur_cmd = INSERT;
 		cur = cur->next->next;
 	}
+	else if ((cur->tok_value == K_SELECT) &&
+					(cur->next != NULL))
+	{
+		printf("SELECT statement\n");
+		cur_cmd = SELECT;
+		cur = cur->next;
+	}
 	else
   	{
 		printf("Invalid statement\n");
@@ -366,6 +369,9 @@ int do_semantic(token_list *tok_list)
 			case INSERT:
 						rc = sem_insert_row(cur);
 						break;
+			case SELECT:
+						rc = sem_select_query_handler(cur);
+						break;
 			default:
 					; /* no action */
 		}
@@ -374,8 +380,7 @@ int do_semantic(token_list *tok_list)
 	return rc;
 }
 
-int sem_create_table(token_list *t_list)
-{
+int sem_create_table(token_list *t_list){
 	int rc = 0;
 	token_list *cur;
 	tpd_entry tab_entry;
@@ -641,8 +646,7 @@ int sem_create_table(token_list *t_list)
   return rc;
 }
 
-int sem_drop_table(token_list *t_list)
-{
+int sem_drop_table(token_list *t_list){
 	int rc = 0;
 	token_list *cur;
 	tpd_entry *tab_entry = NULL;
@@ -852,8 +856,7 @@ int sem_list_schema(token_list *t_list){
   return rc;
 }
 
-int sem_insert_row(token_list *t_list)
-{
+int sem_insert_row(token_list *t_list){
 	// printf("about to start insert operation\n");
 
     token_list *cur = t_list;
@@ -928,10 +931,14 @@ int sem_insert_row(token_list *t_list)
     for (int i = 0; i < num_columns; i++, col_entry++)
     {
         // Expect value (either int or string)
+
+		printf("%s: ", col_entry->col_name);
         if (cur->tok_value == INT_LITERAL && col_entry->col_type == T_INT)
         {
-            int int_value = atoi(cur->tok_string);
+            int int_value = atoi(cur->tok_string);	// Convert String to integer
             memcpy(record_ptr, &int_value, sizeof(int));
+			printf("(int) %d ", *(int*)record_ptr);
+			printf("\n");
             record_ptr += sizeof(int);
         }
         else if (cur->tok_value == STRING_LITERAL && col_entry->col_type == T_CHAR)
@@ -944,7 +951,10 @@ int sem_insert_row(token_list *t_list)
                 return STRING_TOO_LONG;
             }
             memcpy(record_ptr, cur->tok_string, strlen(cur->tok_string));
-            record_ptr += col_entry->col_len;
+			memset(record_ptr + strlen(cur->tok_string), 0, col_entry->col_len - (strlen(cur->tok_string)));
+			printf(" (char*) %s ", (char*)record_ptr);
+			printf("\n");
+			record_ptr += col_entry->col_len;
         }
         else
         {
@@ -992,16 +1002,13 @@ int sem_insert_row(token_list *t_list)
 	printf("Inserted 1 Row.\n");
 
 	// TODO: To be removed later. only use for debugging
-	// int rc = 0;
-	// cur = t_list;
-	// rc = print_tab_file(cur->tok_string);
-	// return rc;
-
-	return 0;
+	int rc = 0;
+	cur = t_list;
+	rc = print_tab_file(cur->tok_string);
+	return rc;
 }
 
-int initialize_tpd_list()
-{
+int initialize_tpd_list(){
 	int rc = 0;
 	FILE *fhandle = NULL;
 	//	struct _stat file_stat;
@@ -1062,8 +1069,7 @@ int initialize_tpd_list()
 	return rc;
 }
 	
-int add_tpd_to_list(tpd_entry *tpd)
-{
+int add_tpd_to_list(tpd_entry *tpd){
 	int rc = 0;
 	int old_size = 0;
 	FILE *fhandle = NULL;
@@ -1099,8 +1105,7 @@ int add_tpd_to_list(tpd_entry *tpd)
 	return rc;
 }
 
-int drop_tpd_from_list(char *tabname)
-{
+int drop_tpd_from_list(char *tabname){
 	int rc = 0;
 	tpd_entry *cur = &(g_tpd_list->tpd_start);
 	int num_tables = g_tpd_list->num_tables;
@@ -1207,8 +1212,7 @@ int drop_tpd_from_list(char *tabname)
 	return rc;
 }
 
-tpd_entry* get_tpd_from_list(char *tabname)
-{
+tpd_entry* get_tpd_from_list(char *tabname){
 	tpd_entry *tpd = NULL;
 	tpd_entry *cur = &(g_tpd_list->tpd_start);
 	int num_tables = g_tpd_list->num_tables;
@@ -1285,8 +1289,7 @@ int create_tab_file(tpd_entry *tpd){
 	return 0;
 }
 
-int print_tab_file(char *table_name)
-{
+int print_tab_file(char *table_name){
     FILE *tab_file;
     char filename[MAX_IDENT_LEN + 5];  // For "<table_name>.tab"
     table_file_header table_header;
@@ -1327,6 +1330,7 @@ int print_tab_file(char *table_name)
     col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
 
     // Print column headers
+	printf("\n");
     for (int i = 0; i < num_columns; i++, col_entry++)
     {
         printf("%s\t", col_entry->col_name);
@@ -1379,6 +1383,165 @@ int print_tab_file(char *table_name)
 
 	
 	// printf("tab file read successfully\n");
+
+    return 0;
+}
+
+int sem_select_query_handler(token_list *t_list){
+	char table_name[MAX_IDENT_LEN];
+    char *columns[MAX_NUM_COL];
+    int num_columns;
+    int rc;
+
+    // Parse the table and column names
+    rc = parse_table_and_columns(t_list, table_name, columns, &num_columns);
+    if (rc != 0) {
+        printf("Error parsing table or columns\n");
+        return rc;
+    }
+
+    // Execute the select operation
+    rc = select_from_table(table_name, columns, num_columns);
+    if (rc != 0) {
+        printf("Error executing select operation on table '%s'\n", table_name);
+    }
+
+    // Free allocated memory for column names
+    for (int i = 0; i < num_columns; i++) {
+        free(columns[i]);
+    }
+
+    return rc;
+}
+
+int select_from_table(char* table_name, char** columns, int num_columns_to_select) {
+    // Open the .tab file
+    char filename[MAX_IDENT_LEN + 5];
+    sprintf(filename, "%s.tab", table_name);
+    FILE *tab_file = fopen(filename, "rb");
+    if (!tab_file) {
+        fprintf(stderr, "Error: Could not open table file %s\n", filename);
+        return -1;
+    }
+
+    // Read the table header
+    table_file_header table_header;
+    fread(&table_header, sizeof(table_file_header), 1, tab_file);
+
+    // Retrieve the table descriptor
+    tpd_entry *tpd = get_tpd_from_list(table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table descriptor not found for table %s\n", table_name);
+        fclose(tab_file);
+        return -1;
+    }
+
+    int num_columns = tpd->num_columns;
+    cd_entry *col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
+
+    // Determine indices of selected columns
+    int selected_col_indices[num_columns_to_select];
+    for (int i = 0; i < num_columns_to_select; i++) {
+        int found = 0;
+        for (int j = 0; j < num_columns; j++) {
+            if (strcmp(col_entry[j].col_name, columns[i]) == 0) {
+                selected_col_indices[i] = j;
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            fprintf(stderr, "Error: Column %s not found in table %s\n", columns[i], table_name);
+            fclose(tab_file);
+            return -1;
+        }
+    }
+
+    // Print headers
+    for (int i = 0; i < num_columns_to_select; i++) {
+        printf("%s\t", columns[i]);
+    }
+    printf("\n---------------------------------------------\n");
+
+    // Read and print each record
+    char *record_buffer = (char *)malloc(table_header.record_size);
+    if (!record_buffer) {
+        fprintf(stderr, "Memory allocation error\n");
+        fclose(tab_file);
+        return -1;
+    }
+
+    for (int i = 0; i < table_header.num_records; i++) {
+        fread(record_buffer, table_header.record_size, 1, tab_file);
+
+        // Print values of selected columns for the current record
+		for (int j = 0; j < num_columns_to_select; j++) {
+			int col_offset = 0;
+			cd_entry *col = &col_entry[selected_col_indices[j]];
+
+			// Calculate offset by summing the lengths of all preceding columns
+			for (int k = 0; k < selected_col_indices[j]; k++) {
+				col_offset += col_entry[k].col_len;
+			}
+
+			// Use col_offset to access the field in record_buffer
+			char *field_ptr = record_buffer + col_offset;
+
+			if (col->col_type == T_INT) {
+				int int_value;
+				memcpy(&int_value, field_ptr, sizeof(int));
+				printf("%d\t", int_value);
+			} else if (col->col_type == T_CHAR) {
+				char str_value[MAX_TOK_LEN + 1] = {0};
+				strncpy(str_value, field_ptr, col->col_len);
+				printf("%s\t", str_value);
+			}
+		}
+		printf("\n");
+    }
+
+    // Clean up
+    free(record_buffer);
+    fclose(tab_file);
+    return 0;
+}
+
+int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int *num_columns) {
+    *num_columns = 0;
+
+    // Step 1: Parse column names (until reaching "FROM")
+    while (tok_ptr && tok_ptr->tok_value != K_FROM) {
+        if (tok_ptr->tok_value == IDENT) {
+            // Allocate space for column name and copy it
+            columns[*num_columns] = (char *)malloc(MAX_IDENT_LEN);
+            if (!columns[*num_columns]) {
+                perror("Memory allocation failed for column name");
+                return MEMORY_ERROR;
+            }
+            strncpy(columns[*num_columns], tok_ptr->tok_string, MAX_IDENT_LEN);
+            (*num_columns)++;
+        }
+
+        // Move to the next token (expect a comma or "FROM")
+        tok_ptr = tok_ptr->next;
+        if (tok_ptr && tok_ptr->tok_value == S_COMMA) {
+            tok_ptr = tok_ptr->next;  // Skip comma
+        }
+    }
+
+    // Step 2: Parse the "FROM" keyword
+    if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
+        perror("Syntax error: Expected 'FROM' keyword");
+        return INVALID_STATEMENT;
+    }
+    tok_ptr = tok_ptr->next;
+
+    // Step 3: Parse table name
+    if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+        perror("Syntax error: Expected table name after 'FROM'");
+        return INVALID_STATEMENT;
+    }
+    strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
 
     return 0;
 }
