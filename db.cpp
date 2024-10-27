@@ -137,12 +137,12 @@ int get_token(char* command, token_list** tok_list){
 
 				if (found_keyword)
 				{
-				  if (KEYWORD_OFFSET+j < K_CREATE)
+					if (KEYWORD_OFFSET+j < K_CREATE)
 						t_class = type_name;
 					else if (KEYWORD_OFFSET+j >= F_SUM)
-            t_class = function_name;
-          else
-					  t_class = keyword;
+            			t_class = function_name;
+          			else
+						t_class = keyword;
 
 					add_to_list(tok_list, temp_string, t_class, KEYWORD_OFFSET+j);
 				}
@@ -1390,26 +1390,62 @@ int print_tab_file(char *table_name){
 int sem_select_query_handler(token_list *t_list){
 	char table_name[MAX_IDENT_LEN];
     char *columns[MAX_NUM_COL];
-    int num_columns;
+    int *num_columns;
+
+	char table_1[MAX_IDENT_LEN];
+	char table_2[MAX_IDENT_LEN];
+	char t1_join_column[MAX_IDENT_LEN];
+	char t2_join_column[MAX_IDENT_LEN];
+	char *t1_columns[MAX_NUM_COL];
+	char *t2_columns[MAX_NUM_COL];
+	int t1_num_columns;
+	int t2_num_columns;
+
 	int rc;
 
-    // Parse the table and column names
-    rc = parse_table_and_columns(t_list, table_name, columns, &num_columns);
-    if (rc != 0) {
-        printf("Error parsing table or columns\n");
-        return rc;
-    }
+	int process_inner_join = 0;
+	process_inner_join = has_inner_join(t_list);
 
-    // Execute the select operation
-    rc = select_from_table(table_name, columns, num_columns);
-    if (rc != 0) {
-        printf("Error executing select operation on table '%s'\n", table_name);
-    }
+	if (process_inner_join==0){
+		// Parse the table and column names
+		rc = parse_table_and_columns(t_list, table_name, columns, &num_columns);
+		if (rc != 0) {
+			printf("Error parsing table or columns\n");
+			return rc;
+		}
 
-    // Free allocated memory for column names
-    for (int i = 0; i < num_columns; i++) {
-        free(columns[i]);
-    }
+		// Execute the select operation
+		rc = select_from_table(table_name, columns, *num_columns);
+		if (rc != 0) {
+			printf("Error executing select operation on table '%s'\n", table_name);
+		}
+
+		// Free allocated memory for column names
+		for (int i = 0; i < *num_columns; i++) {
+			free(columns[i]);
+		}
+	}
+	else
+	{
+		printf("prcessing inner join\n");
+
+		rc = parse_inner_join_table_and_columns(t_list,
+												table_1,
+												table_2,
+												t1_columns,
+												t2_columns,
+												t1_join_column,
+												t2_join_column,
+												&t1_num_columns,
+												&t2_num_columns,
+												columns,
+												&num_columns);
+
+		if (rc != 0) {
+			printf("Error parsing table or columns\n");
+			return rc;
+		}
+	}
 
     return rc;
 }
@@ -1506,13 +1542,37 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
     return 0;
 }
 
-int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int *num_columns) {
+int has_inner_join(token_list *tok_ptr){
+	int k_inner_found = 0;
+	while(tok_ptr && tok_ptr->tok_value != EOC){
+		if (k_inner_found == 0){
+			if (tok_ptr->tok_value == K_INNER){
+				k_inner_found = 1;
+			}
+			tok_ptr = tok_ptr->next;
+		}else{
+			// Keyword INNER was found, now look for JOIN
+			if (tok_ptr->tok_value != K_JOIN){
+				perror("Invalid use of INNER keyword.");
+				return INVALID_STATEMENT;
+			}else{
+				// JOIN keyword found
+				return 1;
+			}
+
+		}
+	}
+
+	return 0;
+}
+
+int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int **num_columns) {
     tpd_entry *tab_entry = NULL;
 	cd_entry *col_entry = NULL;
 
 	int rc =0;
 
-    // Step 1: Parse column names (until reaching "FROM")
+	// Step 1: Parse column names (until reaching "FROM")
 	if (tok_ptr && tok_ptr -> tok_value == S_STAR){
 		// Step 1 a: If Select ALL (*)
 
@@ -1520,13 +1580,13 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 		tok_ptr = tok_ptr->next;
 		if (tok_ptr && tok_ptr->tok_value != K_FROM){
 			perror("Syntax error: Expected 'FROM' keyword");
-        	return INVALID_STATEMENT;
+			return INVALID_STATEMENT;
 		}
 		// Check if next token is IDENTIFIER <table_name>
 		tok_ptr = tok_ptr->next;
 		if (tok_ptr && tok_ptr->tok_value != IDENT){
 			perror("Syntax error: Expected <table_name> Identifier after FROM keyword");
-        	return INVALID_STATEMENT;
+			return INVALID_STATEMENT;
 		}
 
 		// copy Table name in table_name pointer
@@ -1541,11 +1601,11 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 		}
 
 		// Get list of columns from the schema
-		*num_columns = tab_entry->num_columns;
+		*num_columns = &tab_entry->num_columns;
 
 		int i=0;
 		for(i = 0, col_entry = (cd_entry*)((char*)tab_entry + tab_entry->cd_offset);
-								i <= tab_entry->num_columns; i++, col_entry++)
+			i <= tab_entry->num_columns; i++, col_entry++)
 		{
 			// Access column names by col_entry->col_name
 			columns[i] = (char *)malloc(MAX_IDENT_LEN);
@@ -1556,18 +1616,19 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 			strncpy(columns[i], col_entry->col_name, MAX_IDENT_LEN);
 		}
 
-	}else{		
+	}else{
+		int col_count=0;
 		// Step 1 b: If Select column
 		while (tok_ptr && tok_ptr->tok_value != K_FROM) {
 			if (tok_ptr->tok_value == IDENT) {
 				// Allocate space for column name and copy it
-				columns[*num_columns] = (char *)malloc(MAX_IDENT_LEN);
-				if (!columns[*num_columns]) {
+				columns[col_count] = (char *)malloc(MAX_IDENT_LEN);
+				if (!columns[col_count]) {
 					perror("Memory allocation failed for column name");
 					return MEMORY_ERROR;
 				}
-				strncpy(columns[*num_columns], tok_ptr->tok_string, MAX_IDENT_LEN);
-				(*num_columns)++;
+				strncpy(columns[col_count], tok_ptr->tok_string, MAX_IDENT_LEN);
+				col_count++;
 			}
 
 			// Move to the next token (expect a comma or "FROM")
@@ -1575,22 +1636,260 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 			if (tok_ptr && tok_ptr->tok_value == S_COMMA) {
 				tok_ptr = tok_ptr->next;  // Skip comma
 			}
-
-			// Step 2: Parse the "FROM" keyword
-			if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
-				perror("Syntax error: Expected 'FROM' keyword");
-				return INVALID_STATEMENT;
-			}
-			tok_ptr = tok_ptr->next;
-
-			// Step 3: Parse table name
-			if (!tok_ptr || tok_ptr->tok_value != IDENT) {
-				perror("Syntax error: Expected table name after 'FROM'");
-				return INVALID_STATEMENT;
-			}
-			strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
 		}
+
+		*num_columns = &col_count;
+
+		// Step 2: Parse the "FROM" keyword
+		if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
+			perror("Syntax error: Expected 'FROM' keyword");
+			return INVALID_STATEMENT;
+		}
+		tok_ptr = tok_ptr->next;
+
+		// Step 3: Parse table name
+		if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+			perror("Syntax error: Expected table name after 'FROM'");
+			return INVALID_STATEMENT;
+		}
+		strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
 	}
 
     return 0;
+}
+
+int parse_inner_join_table_and_columns(token_list *tok_ptr,
+										char *table_1,
+										char *table_2,
+										char **table_1_columns,
+										char **table_2_columns,
+										char *table_1_join_col,
+										char *table_2_join_col,
+										int *num_columns_table_1,
+										int *num_columns_table_2,
+										char **columns,
+										int **num_columns ){
+	
+	// Step 0: Count Number of columns
+	token_list *temp_ptr = tok_ptr;
+	int column_count = 0;
+	while (tok_ptr && tok_ptr->tok_value != K_FROM){
+			if (tok_ptr->tok_value == IDENT) {
+				// printf("%s", tok_ptr->tok_string);
+				column_count++;
+			}
+
+			// Move to the next token (expect a comma or "FROM")
+			tok_ptr = tok_ptr->next;
+			if (tok_ptr && tok_ptr->tok_value == S_COMMA) {
+				tok_ptr = tok_ptr->next;  // Skip comma
+			}
+	}
+	// Check FROM keyword
+	if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
+		perror("**Syntax error: Expected 'FROM' keyword");
+		return INVALID_STATEMENT;
+	}
+
+	// Reset tok_ptr to the start
+	tok_ptr = temp_ptr;
+	*num_columns = &column_count;
+
+	int i=0;
+	// Step 1: Extract columns
+	while (tok_ptr && tok_ptr->tok_value != K_FROM) {
+			if (tok_ptr->tok_value == IDENT) {
+				// Allocate space for column name and copy it
+				columns[i] = (char *)malloc(MAX_IDENT_LEN);
+				if (!columns[i]) {
+					perror("Memory allocation failed for column name");
+					return MEMORY_ERROR;
+				}
+				
+				// printf("%s", tok_ptr->tok_string);
+				strncpy(columns[i], tok_ptr->tok_string, MAX_IDENT_LEN);
+				i++;
+			}
+
+			// Move to the next token (expect a comma or "FROM")
+			tok_ptr = tok_ptr->next;
+			if (tok_ptr && tok_ptr->tok_value == S_COMMA) {
+				tok_ptr = tok_ptr->next;  // Skip comma
+			}
+	}
+
+	// printf("%s", tok_ptr->tok_string);
+
+	// Step 3: Parse table_1 name
+	tok_ptr = tok_ptr->next;
+	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+		perror("Syntax error: Expected table name after 'FROM'");
+		return INVALID_STATEMENT;
+	}
+	// printf("%s", tok_ptr->tok_string);
+	strncpy(table_1, tok_ptr->tok_string, MAX_IDENT_LEN);
+
+	// Step 4: Parse Inner Join clause
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != K_INNER){
+		perror("Syntax error: Expected INNER keyword after 'FROM'");
+		return INVALID_STATEMENT;
+	}
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != K_JOIN){
+		perror("Syntax error: Expected JOIN keyword after 'INNER'");
+		return INVALID_STATEMENT;
+	}
+
+	// Step 5: Parse table_2 name
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+		perror("Syntax error: Expected table name after 'FROM'");
+		return INVALID_STATEMENT;
+	}
+	strncpy(table_2, tok_ptr->tok_string, MAX_IDENT_LEN);
+
+	// Step 6: Parse ON keyword
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != K_ON){
+		perror("Syntax error: Expected ON keyword after table_1 of INNER JOIN");
+		return INVALID_STATEMENT;
+	}
+
+	// Step 7: Parse table_1.column
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+		perror("Syntax error: Expected column name after table name");
+		return INVALID_STATEMENT;
+	}
+	strncpy(table_1_join_col, tok_ptr->tok_string, MAX_IDENT_LEN);
+
+	// Step 8: Parse '=' symbol
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != S_EQUAL){
+		perror("Syntax error: Expected '=' symbol after columna name in INNER JOIN");
+		return INVALID_STATEMENT;
+	}
+
+	// Step 9: Parse table_2.column
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
+		perror("Syntax error: Expected column name after '=' symbol in INNER JOIN");
+		return INVALID_STATEMENT;
+	}
+	strncpy(table_2_join_col, tok_ptr->tok_string, MAX_IDENT_LEN);
+
+	// Step 10: Parse EOC
+	tok_ptr = tok_ptr->next;
+	// printf("%s", tok_ptr->tok_string);
+	if (!tok_ptr || tok_ptr->tok_value != EOC){
+		perror("Syntax error: Expected end of query");
+		return INVALID_STATEMENT;
+	}
+
+	// Step 11: Assign columns to respective table
+	char filename1[MAX_IDENT_LEN + 5];
+	char filename2[MAX_IDENT_LEN + 5];
+    
+	sprintf(filename1, "%s.tab", table_1);
+    sprintf(filename2, "%s.tab", table_2);
+	
+	FILE *tab_file_1 = fopen(filename1, "rb");
+	FILE *tab_file_2 = fopen(filename2, "rb");
+
+    if (!tab_file_1) {
+        fprintf(stderr, "Error: Could not open table file %s\n", filename1);
+        return -1;
+    }
+	if (!tab_file_2) {
+        fprintf(stderr, "Error: Could not open table file %s\n", filename2);
+        return -1;
+    }
+
+	table_file_header table_header_1, table_header_2;
+
+    fread(&table_header_1, sizeof(table_file_header), 1, tab_file_1);
+    fread(&table_header_2, sizeof(table_file_header), 1, tab_file_2);
+
+	tpd_entry *tpd1 = get_tpd_from_list(table_1);
+	tpd_entry *tpd2 = get_tpd_from_list(table_2);
+
+	if (!tpd1){
+		fprintf(stderr, "Error: Table descriptor not found for table %s\n", table_1);
+        fclose(tab_file_1);
+        return -1;
+	}
+	if (!tpd2){
+		fprintf(stderr, "Error: Table descriptor not found for table %s\n", table_2);
+        fclose(tab_file_2);
+        return -1;
+	}
+
+	int table_1_all_col_count = tpd1->num_columns;
+	int table_2_all_col_count = tpd2->num_columns;
+
+	cd_entry *col_entry_1 = (cd_entry*)((char*)tpd1+tpd1->cd_offset);
+	cd_entry *col_entry_2 = (cd_entry*)((char*)tpd2+tpd2->cd_offset);
+
+	// Determine indices of selected columns
+    int selected_col_indices[**num_columns];
+    for (int i = 0; i < **num_columns; i++) {
+        int found_1 = 0;
+		// Look for required column in table 1
+        for (int j = 0; j < table_1_all_col_count; j++) {
+            if (strcmp(col_entry_1[j].col_name, columns[i]) == 0) {
+                selected_col_indices[i] = j;
+                found_1 = 1;
+                break;
+            }
+        }
+
+		int found_2 = 0;
+		// Look for required column in table 2
+        for (int j = 0; j < table_2_all_col_count; j++) {
+            if (strcmp(col_entry_2[j].col_name, columns[i]) == 0) {
+                selected_col_indices[i] = j;
+                found_2 = 1;
+                break;
+            }
+        }
+
+        if (found_1==0 && found_2==0) {
+            fprintf(stderr, "Error: Column %s not found in table %s or table %s\n", columns[i], table_1, table_2);
+            fclose(tab_file_1);
+			fclose(tab_file_2);
+            return -1;
+        }
+    }
+
+	// Step 12: Print Data
+	for (int i = 0; i < **num_columns; i++) {
+        printf("%s\t", columns[i]);
+    }
+    printf("\n---------------------------------------------\n");
+
+	// TODO: Add Logic to merge columns of two tables
+
+	return 0;
+}
+
+int select_inner_join_tables(char *table_1,
+								char *table_2,
+								char** t1_columns,
+								char** t2_columns,
+								int t1_num_columns,
+								int t2_num_columns){
+	/*
+		Step 1: Read table_1 and table_2
+		Step 2: Map rows by matching columns
+		Step 3: print mapped rows
+	 */
+	return 0;
 }

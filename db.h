@@ -121,6 +121,9 @@ typedef enum t_value
   	F_SUM,        	// 37
   	F_AVG,        	// 38
 	F_COUNT,      	// 39 - new function name should be added below this line
+	K_INNER,		// 40
+	K_JOIN,			// 41
+	K_ON,			// 42
 	S_LEFT_PAREN = 70,		// 70
 	S_RIGHT_PAREN,		 	// 71
 	S_COMMA,			 	// 72
@@ -136,7 +139,7 @@ typedef enum t_value
 } token_value;
 
 /* This constants must be updated when add new keywords */
-#define TOTAL_KEYWORDS_PLUS_TYPE_NAMES 30
+#define TOTAL_KEYWORDS_PLUS_TYPE_NAMES 33
 
 /* New keyword must be added in the same position/order as the enum
    definition above, otherwise the lookup will be wrong */
@@ -171,7 +174,10 @@ char *keyword_table[] =
   "or",
   "sum",
   "avg",
-  "count"
+  "count",
+  "inner",
+  "join",
+  "on"
 };
 
 /* This enum defines a set of possible statements */
@@ -225,8 +231,14 @@ int sem_insert_row(token_list *t_list);
 int create_tab_file(tpd_entry *tpd);
 int print_tab_file(char *table_name);
 int select_from_table(char* table_name, char** columns, int num_columns_to_select);
-int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int *num_columns);
+int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int **num_columns);
 int sem_select_query_handler(token_list *t_list);
+int has_inner_join(token_list *tok_ptr);
+int parse_inner_join_table_and_columns(token_list *tok_ptr, char *table_1, char *table_2,
+										char **table_1_columns, char **table_2_columns,
+										char *table_1_join_col, char *table_2_join_col, 
+										int *num_columns_table_1, int *num_columns_table_2,
+										char **columns, int **num_columns );
 
 /*
 	Keep a global list of tpd - in real life, this will be stored
