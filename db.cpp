@@ -380,6 +380,311 @@ int do_semantic(token_list *tok_list){
 	return rc;
 }
 
+int initialize_tpd_list(){
+	int rc = 0;
+	FILE *fhandle = NULL;
+	//	struct _stat file_stat;
+	struct stat file_stat;
+
+	/* Open for read */
+	if((fhandle = fopen("dbfile.bin", "rbc")) == NULL)
+	{
+			if((fhandle = fopen("dbfile.bin", "wbc")) == NULL)
+			{
+				rc = FILE_OPEN_ERROR;
+			}
+			else
+			{
+				g_tpd_list = NULL;
+				g_tpd_list = (tpd_list*)calloc(1, sizeof(tpd_list));
+				
+				if (!g_tpd_list)
+				{
+					rc = MEMORY_ERROR;
+				}
+				else
+				{
+					g_tpd_list->list_size = sizeof(tpd_list);
+					fwrite(g_tpd_list, sizeof(tpd_list), 1, fhandle);
+					fflush(fhandle);
+					fclose(fhandle);
+				}
+			}
+	}
+	else
+	{
+			/* There is a valid dbfile.bin file - get file size */
+			//		_fstat(_fileno(fhandle), &file_stat);
+			fstat(fileno(fhandle), &file_stat);
+			// printf("dbfile.bin size = %d\n", file_stat.st_size);
+
+			g_tpd_list = (tpd_list*)calloc(1, file_stat.st_size);
+
+			if (!g_tpd_list)
+			{
+				rc = MEMORY_ERROR;
+			}
+			else
+			{
+				fread(g_tpd_list, file_stat.st_size, 1, fhandle);
+				fflush(fhandle);
+				fclose(fhandle);
+
+				if (g_tpd_list->list_size != file_stat.st_size)
+				{
+					rc = DBFILE_CORRUPTION;
+				}
+
+			}
+	}
+    
+	return rc;
+}
+	
+int add_tpd_to_list(tpd_entry *tpd){
+	int rc = 0;
+	int old_size = 0;
+	FILE *fhandle = NULL;
+
+	if((fhandle = fopen("dbfile.bin", "wbc")) == NULL)
+	{
+		rc = FILE_OPEN_ERROR;
+	}
+  else
+	{
+		old_size = g_tpd_list->list_size;
+
+		if (g_tpd_list->num_tables == 0)
+		{
+			/* If this is an empty list, overlap the dummy header */
+			g_tpd_list->num_tables++;
+		 	g_tpd_list->list_size += (tpd->tpd_size - sizeof(tpd_entry));
+			fwrite(g_tpd_list, old_size - sizeof(tpd_entry), 1, fhandle);
+		}
+		else
+		{
+			/* There is at least 1, just append at the end */
+			g_tpd_list->num_tables++;
+		 	g_tpd_list->list_size += tpd->tpd_size;
+			fwrite(g_tpd_list, old_size, 1, fhandle);
+		}
+
+		fwrite(tpd, tpd->tpd_size, 1, fhandle);
+		fflush(fhandle);
+		fclose(fhandle);
+	}
+
+	return rc;
+}
+
+int drop_tpd_from_list(char *tabname){
+	int rc = 0;
+	tpd_entry *cur = &(g_tpd_list->tpd_start);
+	int num_tables = g_tpd_list->num_tables;
+	bool found = false;
+	int count = 0;
+
+	if (num_tables > 0)
+	{
+		while ((!found) && (num_tables-- > 0))
+		{
+			if (strcasecmp(cur->table_name, tabname) == 0)
+			{
+				/* found it */
+				found = true;
+				int old_size = 0;
+				FILE *fhandle = NULL;
+
+				if((fhandle = fopen("dbfile.bin", "wbc")) == NULL)
+				{
+					rc = FILE_OPEN_ERROR;
+				}
+			  else
+				{
+					old_size = g_tpd_list->list_size;
+
+					if (count == 0)
+					{
+						/* If this is the first entry */
+						g_tpd_list->num_tables--;
+
+						if (g_tpd_list->num_tables == 0)
+						{
+							/* This is the last table, null out dummy header */
+							memset((void*)g_tpd_list, '\0', sizeof(tpd_list));
+							g_tpd_list->list_size = sizeof(tpd_list);
+							fwrite(g_tpd_list, sizeof(tpd_list), 1, fhandle);
+						}
+						else
+						{
+							/* First in list, but not the last one */
+							g_tpd_list->list_size -= cur->tpd_size;
+
+							/* First, write the 8 byte header */
+							fwrite(g_tpd_list, sizeof(tpd_list) - sizeof(tpd_entry),
+								     1, fhandle);
+
+							/* Now write everything starting after the cur entry */
+							fwrite((char*)cur + cur->tpd_size,
+								     old_size - cur->tpd_size -
+										 (sizeof(tpd_list) - sizeof(tpd_entry)),
+								     1, fhandle);
+						}
+					}
+					else
+					{
+						/* This is NOT the first entry - count > 0 */
+						g_tpd_list->num_tables--;
+					 	g_tpd_list->list_size -= cur->tpd_size;
+
+						/* First, write everything from beginning to cur */
+						fwrite(g_tpd_list, ((char*)cur - (char*)g_tpd_list),
+									 1, fhandle);
+
+						/* Check if cur is the last entry. Note that g_tdp_list->list_size
+						   has already subtracted the cur->tpd_size, therefore it will
+						   point to the start of cur if cur was the last entry */
+						if ((char*)g_tpd_list + g_tpd_list->list_size == (char*)cur)
+						{
+							/* If true, nothing else to write */
+						}
+						else
+						{
+							/* NOT the last entry, copy everything from the beginning of the
+							   next entry which is (cur + cur->tpd_size) and the remaining size */
+							fwrite((char*)cur + cur->tpd_size,
+										 old_size - cur->tpd_size -
+										 ((char*)cur - (char*)g_tpd_list),							     
+								     1, fhandle);
+						}
+					}
+
+					fflush(fhandle);
+					fclose(fhandle);
+				}
+
+				
+			}
+			else
+			{
+				if (num_tables > 0)
+				{
+					cur = (tpd_entry*)((char*)cur + cur->tpd_size);
+					count++;
+				}
+			}
+		}
+	}
+	
+	if (!found)
+	{
+		rc = INVALID_TABLE_NAME;
+	}
+
+	return rc;
+}
+
+tpd_entry* get_tpd_from_list(char *tabname){
+	tpd_entry *tpd = NULL;
+	tpd_entry *cur = &(g_tpd_list->tpd_start);
+	int num_tables = g_tpd_list->num_tables;
+	bool found = false;
+
+	if (num_tables > 0)
+	{
+		while ((!found) && (num_tables-- > 0))
+		{
+			if (strcasecmp(cur->table_name, tabname) == 0)
+			{
+				/* found it */
+				found = true;
+				tpd = cur;
+			}
+			else
+			{
+				if (num_tables > 0)
+				{
+					cur = (tpd_entry*)((char*)cur + cur->tpd_size);
+				}
+			}
+		}
+	}
+
+	return tpd;
+}
+
+/************************************************************* 
+	Utility Function to Create .tab Binary File
+ *************************************************************/
+int create_tab_file(tpd_entry *tpd){
+	FILE *tab_file;
+	char filename[MAX_IDENT_LEN + 5];	// For "<table_name>.tab"
+	int record_size = 0;
+	table_file_header table_header;
+
+	// Cconstruct filename for .tab file
+	sprintf(filename, "%s.tab", tpd->table_name);
+
+	// Open a new binary file
+	tab_file = fopen(filename, "wb");
+	if(!tab_file){
+		return FILE_OPEN_ERROR;
+	}
+
+	// Calculate record size based on table's schema
+	cd_entry *col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
+	for (int i=0;i<tpd->num_columns; i++, col_entry++){
+		if (col_entry->col_type == T_INT){
+			record_size += sizeof(int);	// 4 bytes for INT
+		}
+		else if(col_entry->col_type == T_CHAR){
+			record_size += col_entry->col_len +1; // CHAR(n) with 1-byte length prefix
+		}
+		// TODO: Add support for other data types
+	}
+
+	// Round the record size to a multiple of 4 for fast disk IO
+	if (record_size % 4 != 0){
+		record_size += 4 - (record_size % 4);
+	}
+
+	// Initialize table file header
+	memset(&table_header, 0, sizeof(table_file_header));
+	table_header.file_size = sizeof(table_file_header);
+	table_header.record_size = record_size;
+	table_header.num_records =0;
+	table_header.record_offset = sizeof(table_file_header);
+	table_header.file_header_flag =0;
+	table_header.tpd_ptr = tpd;
+
+	// write header to .tab file
+	fwrite(&table_header, sizeof(table_file_header), 1, tab_file);
+
+	fclose(tab_file);
+	return 0;
+}
+
+/************************************************************* 
+	Utility Function to Delete .tab Binary File
+ *************************************************************/
+int delete_tab_file(tpd_entry *tpd){
+	char filename[MAX_IDENT_LEN + 5];  // +5 to accommodate ".tab\0"
+    snprintf(filename, sizeof(filename), "%s.tab", tpd->table_name);
+
+    // Remove the .tab file
+    if (remove(filename) == 0) {
+        printf("Table '%s' dropped successfully, and '%s' file deleted.\n", tpd->table_name, filename);
+    } else {
+        perror("Error deleting .tab file");  // Error message if deletion fails
+        return FILE_DELETE_ERROR;  // Return an error code (define FILE_DELETE_ERROR as needed)
+    }
+
+	return 0;
+}
+
+/************************************************************* 
+	Handler to Create a new Table
+ *************************************************************/
 int sem_create_table(token_list *t_list){
 	int rc = 0;
 	token_list *cur;
@@ -646,6 +951,9 @@ int sem_create_table(token_list *t_list){
   return rc;
 }
 
+/************************************************************* 
+	Handler to Drop a Table
+ *************************************************************/
 int sem_drop_table(token_list *t_list){
 	int rc = 0;
 	token_list *cur;
@@ -688,6 +996,9 @@ int sem_drop_table(token_list *t_list){
   return rc;
 }
 
+/************************************************************* 
+	Handler to List all tables
+ *************************************************************/
 int sem_list_tables(){
 	int rc = 0;
 	int num_tables = g_tpd_list->num_tables;
@@ -715,6 +1026,9 @@ int sem_list_tables(){
   return rc;
 }
 
+/************************************************************* 
+	Handler to List Schema
+ *************************************************************/
 int sem_list_schema(token_list *t_list){
 	int rc = 0;
 	token_list *cur;
@@ -859,6 +1173,9 @@ int sem_list_schema(token_list *t_list){
   return rc;
 }
 
+/************************************************************* 
+	Handler to Insert new Row
+ *************************************************************/
 int sem_insert_row(token_list *t_list){
 
     token_list *cur = t_list;
@@ -1019,397 +1336,9 @@ int sem_insert_row(token_list *t_list){
 	return 0;
 }
 
-int initialize_tpd_list(){
-	int rc = 0;
-	FILE *fhandle = NULL;
-	//	struct _stat file_stat;
-	struct stat file_stat;
-
-	/* Open for read */
-	if((fhandle = fopen("dbfile.bin", "rbc")) == NULL)
-	{
-			if((fhandle = fopen("dbfile.bin", "wbc")) == NULL)
-			{
-				rc = FILE_OPEN_ERROR;
-			}
-			else
-			{
-				g_tpd_list = NULL;
-				g_tpd_list = (tpd_list*)calloc(1, sizeof(tpd_list));
-				
-				if (!g_tpd_list)
-				{
-					rc = MEMORY_ERROR;
-				}
-				else
-				{
-					g_tpd_list->list_size = sizeof(tpd_list);
-					fwrite(g_tpd_list, sizeof(tpd_list), 1, fhandle);
-					fflush(fhandle);
-					fclose(fhandle);
-				}
-			}
-	}
-	else
-	{
-			/* There is a valid dbfile.bin file - get file size */
-			//		_fstat(_fileno(fhandle), &file_stat);
-			fstat(fileno(fhandle), &file_stat);
-			// printf("dbfile.bin size = %d\n", file_stat.st_size);
-
-			g_tpd_list = (tpd_list*)calloc(1, file_stat.st_size);
-
-			if (!g_tpd_list)
-			{
-				rc = MEMORY_ERROR;
-			}
-			else
-			{
-				fread(g_tpd_list, file_stat.st_size, 1, fhandle);
-				fflush(fhandle);
-				fclose(fhandle);
-
-				if (g_tpd_list->list_size != file_stat.st_size)
-				{
-					rc = DBFILE_CORRUPTION;
-				}
-
-			}
-	}
-    
-	return rc;
-}
-	
-int add_tpd_to_list(tpd_entry *tpd){
-	int rc = 0;
-	int old_size = 0;
-	FILE *fhandle = NULL;
-
-	if((fhandle = fopen("dbfile.bin", "wbc")) == NULL)
-	{
-		rc = FILE_OPEN_ERROR;
-	}
-  else
-	{
-		old_size = g_tpd_list->list_size;
-
-		if (g_tpd_list->num_tables == 0)
-		{
-			/* If this is an empty list, overlap the dummy header */
-			g_tpd_list->num_tables++;
-		 	g_tpd_list->list_size += (tpd->tpd_size - sizeof(tpd_entry));
-			fwrite(g_tpd_list, old_size - sizeof(tpd_entry), 1, fhandle);
-		}
-		else
-		{
-			/* There is at least 1, just append at the end */
-			g_tpd_list->num_tables++;
-		 	g_tpd_list->list_size += tpd->tpd_size;
-			fwrite(g_tpd_list, old_size, 1, fhandle);
-		}
-
-		fwrite(tpd, tpd->tpd_size, 1, fhandle);
-		fflush(fhandle);
-		fclose(fhandle);
-	}
-
-	return rc;
-}
-
-int drop_tpd_from_list(char *tabname){
-	int rc = 0;
-	tpd_entry *cur = &(g_tpd_list->tpd_start);
-	int num_tables = g_tpd_list->num_tables;
-	bool found = false;
-	int count = 0;
-
-	if (num_tables > 0)
-	{
-		while ((!found) && (num_tables-- > 0))
-		{
-			if (strcasecmp(cur->table_name, tabname) == 0)
-			{
-				/* found it */
-				found = true;
-				int old_size = 0;
-				FILE *fhandle = NULL;
-
-				if((fhandle = fopen("dbfile.bin", "wbc")) == NULL)
-				{
-					rc = FILE_OPEN_ERROR;
-				}
-			  else
-				{
-					old_size = g_tpd_list->list_size;
-
-					if (count == 0)
-					{
-						/* If this is the first entry */
-						g_tpd_list->num_tables--;
-
-						if (g_tpd_list->num_tables == 0)
-						{
-							/* This is the last table, null out dummy header */
-							memset((void*)g_tpd_list, '\0', sizeof(tpd_list));
-							g_tpd_list->list_size = sizeof(tpd_list);
-							fwrite(g_tpd_list, sizeof(tpd_list), 1, fhandle);
-						}
-						else
-						{
-							/* First in list, but not the last one */
-							g_tpd_list->list_size -= cur->tpd_size;
-
-							/* First, write the 8 byte header */
-							fwrite(g_tpd_list, sizeof(tpd_list) - sizeof(tpd_entry),
-								     1, fhandle);
-
-							/* Now write everything starting after the cur entry */
-							fwrite((char*)cur + cur->tpd_size,
-								     old_size - cur->tpd_size -
-										 (sizeof(tpd_list) - sizeof(tpd_entry)),
-								     1, fhandle);
-						}
-					}
-					else
-					{
-						/* This is NOT the first entry - count > 0 */
-						g_tpd_list->num_tables--;
-					 	g_tpd_list->list_size -= cur->tpd_size;
-
-						/* First, write everything from beginning to cur */
-						fwrite(g_tpd_list, ((char*)cur - (char*)g_tpd_list),
-									 1, fhandle);
-
-						/* Check if cur is the last entry. Note that g_tdp_list->list_size
-						   has already subtracted the cur->tpd_size, therefore it will
-						   point to the start of cur if cur was the last entry */
-						if ((char*)g_tpd_list + g_tpd_list->list_size == (char*)cur)
-						{
-							/* If true, nothing else to write */
-						}
-						else
-						{
-							/* NOT the last entry, copy everything from the beginning of the
-							   next entry which is (cur + cur->tpd_size) and the remaining size */
-							fwrite((char*)cur + cur->tpd_size,
-										 old_size - cur->tpd_size -
-										 ((char*)cur - (char*)g_tpd_list),							     
-								     1, fhandle);
-						}
-					}
-
-					fflush(fhandle);
-					fclose(fhandle);
-				}
-
-				
-			}
-			else
-			{
-				if (num_tables > 0)
-				{
-					cur = (tpd_entry*)((char*)cur + cur->tpd_size);
-					count++;
-				}
-			}
-		}
-	}
-	
-	if (!found)
-	{
-		rc = INVALID_TABLE_NAME;
-	}
-
-	return rc;
-}
-
-tpd_entry* get_tpd_from_list(char *tabname){
-	tpd_entry *tpd = NULL;
-	tpd_entry *cur = &(g_tpd_list->tpd_start);
-	int num_tables = g_tpd_list->num_tables;
-	bool found = false;
-
-	if (num_tables > 0)
-	{
-		while ((!found) && (num_tables-- > 0))
-		{
-			if (strcasecmp(cur->table_name, tabname) == 0)
-			{
-				/* found it */
-				found = true;
-				tpd = cur;
-			}
-			else
-			{
-				if (num_tables > 0)
-				{
-					cur = (tpd_entry*)((char*)cur + cur->tpd_size);
-				}
-			}
-		}
-	}
-
-	return tpd;
-}
-
-int create_tab_file(tpd_entry *tpd){
-	FILE *tab_file;
-	char filename[MAX_IDENT_LEN + 5];	// For "<table_name>.tab"
-	int record_size = 0;
-	table_file_header table_header;
-
-	// Cconstruct filename for .tab file
-	sprintf(filename, "%s.tab", tpd->table_name);
-
-	// Open a new binary file
-	tab_file = fopen(filename, "wb");
-	if(!tab_file){
-		return FILE_OPEN_ERROR;
-	}
-
-	// Calculate record size based on table's schema
-	cd_entry *col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
-	for (int i=0;i<tpd->num_columns; i++, col_entry++){
-		if (col_entry->col_type == T_INT){
-			record_size += sizeof(int);	// 4 bytes for INT
-		}
-		else if(col_entry->col_type == T_CHAR){
-			record_size += col_entry->col_len +1; // CHAR(n) with 1-byte length prefix
-		}
-		// TODO: Add support for other data types
-	}
-
-	// Round the record size to a multiple of 4 for fast disk IO
-	if (record_size % 4 != 0){
-		record_size += 4 - (record_size % 4);
-	}
-
-	// Initialize table file header
-	memset(&table_header, 0, sizeof(table_file_header));
-	table_header.file_size = sizeof(table_file_header);
-	table_header.record_size = record_size;
-	table_header.num_records =0;
-	table_header.record_offset = sizeof(table_file_header);
-	table_header.file_header_flag =0;
-	table_header.tpd_ptr = tpd;
-
-	// write header to .tab file
-	fwrite(&table_header, sizeof(table_file_header), 1, tab_file);
-
-	fclose(tab_file);
-	return 0;
-}
-
-int delete_tab_file(tpd_entry *tpd){
-	char filename[MAX_IDENT_LEN + 5];  // +5 to accommodate ".tab\0"
-    snprintf(filename, sizeof(filename), "%s.tab", tpd->table_name);
-
-    // Remove the .tab file
-    if (remove(filename) == 0) {
-        printf("Table '%s' dropped successfully, and '%s' file deleted.\n", tpd->table_name, filename);
-    } else {
-        perror("Error deleting .tab file");  // Error message if deletion fails
-        return FILE_DELETE_ERROR;  // Return an error code (define FILE_DELETE_ERROR as needed)
-    }
-
-	return 0;
-}
-
-int print_tab_file(char *table_name){
-    FILE *tab_file;
-    char filename[MAX_IDENT_LEN + 5];  // For "<table_name>.tab"
-    table_file_header table_header;
-    tpd_entry *tpd;
-    cd_entry *col_entry;
-    char *record_buffer;
-    int record_size, num_columns, num_records;
-    
-    // Construct the filename for the table's .tab file
-    sprintf(filename, "%s.tab", table_name);
-    
-    // Open the .tab file for reading
-    tab_file = fopen(filename, "rb");
-    if (!tab_file)
-    {
-        // Handle error: Could not open file
-        printf("Error: Could not open %s.tab\n", table_name);
-        return FILE_OPEN_ERROR;
-    }
-    
-    // Read the table file header
-    fread(&table_header, sizeof(table_file_header), 1, tab_file);
-    
-    // Get the record size and number of records
-    record_size = table_header.record_size;
-    num_records = table_header.num_records;
-    
-    // Get the table descriptor from dbfile.bin
-    tpd = get_tpd_from_list(table_name);  // Function to retrieve table descriptor
-    if (!tpd)
-    {
-        printf("Error: Table descriptor not found in dbfile.bin\n");
-        fclose(tab_file);
-        return TABLE_NOT_EXIST;
-    }
-
-    num_columns = tpd->num_columns;
-    col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
-
-    // Print column headers
-	printf("\n");
-    for (int i = 0; i < num_columns; i++, col_entry++)
-    {
-        printf("%s\t", col_entry->col_name);
-    }
-    printf("\n");
-	printf("----------------------------------------------\n");
-    
-    // Allocate buffer for reading records
-    record_buffer = (char*)malloc(record_size);
-    if (!record_buffer)
-    {
-        // Handle error: Memory allocation failed
-        printf("Error: Memory allocation failed\n");
-        fclose(tab_file);
-        return MEMORY_ERROR;
-    }
-
-    // Read and print each record
-    for (int i = 0; i < num_records; i++)
-    {
-        fread(record_buffer, record_size, 1, tab_file);
-        
-        // Parse and print each field in the record
-        col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);  // Reset column pointer
-        char *record_ptr = record_buffer;
-        for (int j = 0; j < num_columns; j++, col_entry++)
-        {
-            if (col_entry->col_type == T_INT)
-            {
-                int int_value;
-                memcpy(&int_value, record_ptr, sizeof(int));
-                printf("%d\t", int_value);
-                record_ptr += sizeof(int);
-            }
-            else if (col_entry->col_type == T_CHAR)
-            {
-                char str_value[MAX_TOK_LEN + 1];
-                memcpy(str_value, record_ptr, col_entry->col_len);
-                str_value[col_entry->col_len] = '\0';  // Null-terminate the string
-                printf("%s\t", str_value);
-                record_ptr += col_entry->col_len + 1;  // Move past string and length prefix
-            }
-        }
-        printf("\n");
-    }
-
-    // Clean up and close file
-    free(record_buffer);
-    fclose(tab_file);
-
-    return 0;
-}
-
+/************************************************************* 
+	Handler for Select Query
+ *************************************************************/
 int sem_select_query_handler(token_list *t_list){
 	char table_name[MAX_IDENT_LEN];
     char *columns[MAX_NUM_COL];
@@ -1464,13 +1393,18 @@ int sem_select_query_handler(token_list *t_list){
     return rc;
 }
 
-int select_from_table(char* table_name, char** columns, int num_columns_to_select) {
+/************************************************************* 
+	Utility function to read rows from table file
+ *************************************************************/
+int select_from_table(char* table_name,
+						char** columns,
+						int num_columns_to_select) {
 
 	// Retrieve the table descriptor
     tpd_entry *tpd = get_tpd_from_list(table_name);
     if (!tpd) {
         fprintf(stderr, "Error: Table descriptor not found for table %s\n", table_name);
-        return -1;
+        return TABLE_NOT_EXIST;
     }
 
     // Open the .tab file
@@ -1479,7 +1413,7 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
     FILE *tab_file = fopen(filename, "rb");
     if (!tab_file) {
         fprintf(stderr, "Error: Could not open table file %s\n", filename);
-        return -1;
+        return FILE_OPEN_ERROR;
     }
 
     // Read the table header
@@ -1503,7 +1437,7 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
         if (!found) {
             fprintf(stderr, "Error: Column %s not found in table %s\n", columns[i], table_name);
             fclose(tab_file);
-            return -1;
+            return INVALID_COLUMN_NAME;
         }
     }
 
@@ -1529,7 +1463,7 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
     if (!record_buffer) {
         fprintf(stderr, "Memory allocation error\n");
         fclose(tab_file);
-        return -1;
+		return MEMORY_ERROR;
     }
 
     for (int i = 0; i < table_header.num_records; i++) {
@@ -1553,12 +1487,10 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
 			if (col->col_type == T_INT) {
 				int int_value;
 				memcpy(&int_value, field_ptr, sizeof(int));
-				// printf("%d\t", int_value);
 				printf("%-20d | ", int_value);
 			} else if (col->col_type == T_CHAR) {
 				char str_value[MAX_TOK_LEN + 1] = {0};
 				strncpy(str_value, field_ptr, col->col_len);
-				// printf("%s\t", str_value);
 				printf("%-20s | ", str_value);
 			}
 		}
@@ -1577,6 +1509,9 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
     return 0;
 }
 
+/************************************************************* 
+	Utility Function to check if Inner Join exists
+ *************************************************************/
 int has_inner_join(token_list *tok_ptr){
 	int k_inner_found = 0;
 	while(tok_ptr && tok_ptr->tok_value != EOC){
@@ -1601,7 +1536,13 @@ int has_inner_join(token_list *tok_ptr){
 	return 0;
 }
 
-int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int **num_columns) {
+/************************************************************* 
+	Utility Function to Prase Select Query
+ *************************************************************/
+int parse_table_and_columns(token_list *tok_ptr,
+								char *table_name,
+								char **columns,
+								int **num_columns) {
     tpd_entry *tab_entry = NULL;
 	cd_entry *col_entry = NULL;
 
@@ -1624,7 +1565,7 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 			return INVALID_STATEMENT;
 		}
 
-		// copy Table name in table_name pointer
+		// Copy Table name in table_name pointer
 		strncpy(table_name, tok_ptr->tok_string, MAX_IDENT_LEN);
 
 		// Access table schema and fetch all columns
@@ -1681,14 +1622,14 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 
 		*num_columns = &col_count;
 
-		// Step 2: Parse the "FROM" keyword
+		// Parse the "FROM" keyword
 		if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
 			perror("Syntax error: Expected 'FROM' keyword");
 			return INVALID_STATEMENT;
 		}
 		tok_ptr = tok_ptr->next;
 
-		// Step 3: Parse table name
+		// Parse table name
 		if (!tok_ptr || tok_ptr->tok_value != IDENT) {
 			perror("Syntax error: Expected table name after 'FROM'");
 			return INVALID_STATEMENT;
@@ -1699,6 +1640,10 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
     return 0;
 }
 
+/************************************************************* 
+	Utility Function to Parse Select Query with Natural Join
+	and Select required rows
+ *************************************************************/
 int handle_inner_join_select_query(token_list *tok_ptr,
 										char *table_1,
 										char *table_2,
@@ -1707,7 +1652,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 										char **columns,
 										int **num_columns ){
 	
-	// Step 0: Count Number of columns
+	// Count Number of columns
 	token_list *temp_ptr = tok_ptr;
 	int column_count = 0;
 	while (tok_ptr && tok_ptr->tok_value != K_FROM){
@@ -1723,7 +1668,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	}
 	// Check FROM keyword
 	if (!tok_ptr || tok_ptr->tok_value != K_FROM) {
-		perror("**Syntax error: Expected 'FROM' keyword");
+		perror("Syntax error: Expected 'FROM' keyword");
 		return INVALID_STATEMENT;
 	}
 
@@ -1732,7 +1677,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	*num_columns = &column_count;
 
 	int i=0;
-	// Step 1: Extract columns
+	// Extract columns
 	while (tok_ptr && tok_ptr->tok_value != K_FROM) {
 			if (tok_ptr->tok_value == IDENT) {
 				// Allocate space for column name and copy it
@@ -1753,7 +1698,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 			}
 	}
 
-	// Step 3: Parse table_1 name
+	// Parse table_1 name
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
 		perror("Syntax error: Expected table name after 'FROM'");
@@ -1761,19 +1706,19 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	}
 	strncpy(table_1, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-	// Step 4: Parse Inner Join clause
+	// Step Parse NATURAL JOIN clause
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != K_NATURAL){
-		perror("Syntax error: Expected INNER keyword after 'FROM'");
+		perror("Syntax error: Expected NATURAL keyword after 'FROM'");
 		return INVALID_STATEMENT;
 	}
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != K_JOIN){
-		perror("Syntax error: Expected JOIN keyword after 'INNER'");
+		perror("Syntax error: Expected JOIN keyword after 'NATURAL'");
 		return INVALID_STATEMENT;
 	}
 
-	// Step 5: Parse table_2 name
+	// Parse table_2 name
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
 		perror("Syntax error: Expected table name after 'FROM'");
@@ -1781,14 +1726,14 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	}
 	strncpy(table_2, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-	// Step 6: Parse ON keyword
+	// Parse ON keyword
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != K_ON){
 		perror("Syntax error: Expected ON keyword after table_1 of INNER JOIN");
 		return INVALID_STATEMENT;
 	}
 
-	// Step 7: Parse table_1.column
+	// Parse table_1.column
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
 		perror("Syntax error: Expected column name after table name");
@@ -1796,14 +1741,14 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	}
 	strncpy(table_1_join_col, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-	// Step 8: Parse '=' symbol
+	// Parse '=' symbol
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != S_EQUAL){
 		perror("Syntax error: Expected '=' symbol after columna name in INNER JOIN");
 		return INVALID_STATEMENT;
 	}
 
-	// Step 9: Parse table_2.column
+	// Parse table_2.column
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT) {
 		perror("Syntax error: Expected column name after '=' symbol in INNER JOIN");
@@ -1811,7 +1756,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	}
 	strncpy(table_2_join_col, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-	// Step 10: Parse EOC
+	// Parse EOC
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != EOC){
 		perror("Syntax error: Expected end of query");
@@ -1899,7 +1844,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 
         // Get join column value from table_1
         void *join_col_value1 = NULL;
-		// Step 1: Calculate offset for join column in table_1
+		// Calculate offset for join column in table_1
 		int offset = 0;
 		for (int k = 0; k < join_col_offset_table1; k++) {
 			offset += col_entry_1[k].col_len;  // Summing the lengths of preceding columns
@@ -1928,13 +1873,13 @@ int handle_inner_join_select_query(token_list *tok_ptr,
             // Get join column value from table_2
             void *join_col_value2 = NULL;
 
-			// Step 1: Calculate offset for join column in table_2
+			// Calculate offset for join column in table_2
 			int offset2 = 0;
 			for (int k = 0; k < join_col_offset_table2; k++) {
 				offset2 += col_entry_2[k].col_len;  // Summing the lengths of preceding columns
 			}
 
-			// Step 2: Access join column in record_buffer_2 using calculated offset
+			// Access join column in record_buffer_2 using calculated offset
 			char *join_col_ptr2 = record_buffer_2 + offset2;
 
 			if (join_col_entry_2->col_type == T_INT) {
@@ -2037,6 +1982,10 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 
 }
 
+/************************************************************* 
+	Utility Function to check if value is NULL as per
+	database standards
+ *************************************************************/
 int is_null(const char *value) {
     return value == NULL || strcmp(value, "") == 0 || strcmp(value,"NULL")==0;
 }
