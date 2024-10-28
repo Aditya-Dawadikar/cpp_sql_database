@@ -203,3 +203,9 @@ SELECT statement
 ```
 
 ***
+
+## TODOs and Limitations
+1. DROP Table command does not delete `.tab` file, it only deletes data from `dbfile.bin` file.
+2. INSERT command does not handle `NOT NULL` constraint.
+3. NATURAL JOIN does not automatically detect columns with same names.
+4. NATURAL JOIN does not support `table.column` notation for columns list. Eg: `SELECT employee.f_name, department.dept_id FROM employee natural join department on employee.dept = department.dept_id` is `INVALID`. Thus column names must be unique across the database, but no check is added to ensure uniqueness across database.
