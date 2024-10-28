@@ -235,10 +235,8 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
 int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int **num_columns);
 int sem_select_query_handler(token_list *t_list);
 int has_inner_join(token_list *tok_ptr);
-int parse_inner_join_table_and_columns(token_list *tok_ptr, char *table_1, char *table_2,
-										char **table_1_columns, char **table_2_columns,
-										char *table_1_join_col, char *table_2_join_col, 
-										int *num_columns_table_1, int *num_columns_table_2,
+int handle_inner_join_select_query(token_list *tok_ptr, char *table_1, char *table_2,
+										char *table_1_join_col, char *table_2_join_col,
 										char **columns, int **num_columns );
 int is_null(const char *value);
 int delete_tab_file(tpd_entry *tpd);

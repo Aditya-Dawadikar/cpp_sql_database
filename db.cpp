@@ -1419,10 +1419,6 @@ int sem_select_query_handler(token_list *t_list){
 	char table_2[MAX_IDENT_LEN];
 	char t1_join_column[MAX_IDENT_LEN];
 	char t2_join_column[MAX_IDENT_LEN];
-	char *t1_columns[MAX_NUM_COL];
-	char *t2_columns[MAX_NUM_COL];
-	int t1_num_columns;
-	int t2_num_columns;
 
 	int rc;
 
@@ -1451,15 +1447,11 @@ int sem_select_query_handler(token_list *t_list){
 	else
 	{
 
-		rc = parse_inner_join_table_and_columns(t_list,
+		rc = handle_inner_join_select_query(t_list,
 												table_1,
 												table_2,
-												t1_columns,
-												t2_columns,
 												t1_join_column,
 												t2_join_column,
-												&t1_num_columns,
-												&t2_num_columns,
 												columns,
 												&num_columns);
 
@@ -1707,15 +1699,11 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
     return 0;
 }
 
-int parse_inner_join_table_and_columns(token_list *tok_ptr,
+int handle_inner_join_select_query(token_list *tok_ptr,
 										char *table_1,
 										char *table_2,
-										char **table_1_columns,
-										char **table_2_columns,
 										char *table_1_join_col,
 										char *table_2_join_col,
-										int *num_columns_table_1,
-										int *num_columns_table_2,
 										char **columns,
 										int **num_columns ){
 	
@@ -2047,20 +2035,6 @@ int parse_inner_join_table_and_columns(token_list *tok_ptr,
 
     return 0;
 
-}
-
-int select_inner_join_tables(char *table_1,
-								char *table_2,
-								char** t1_columns,
-								char** t2_columns,
-								int t1_num_columns,
-								int t2_num_columns){
-	/*
-		Step 1: Read table_1 and table_2
-		Step 2: Map rows by matching columns
-		Step 3: print mapped rows
-	 */
-	return 0;
 }
 
 int is_null(const char *value) {
