@@ -239,7 +239,7 @@ int parse_inner_join_table_and_columns(token_list *tok_ptr, char *table_1, char 
 										char *table_1_join_col, char *table_2_join_col, 
 										int *num_columns_table_1, int *num_columns_table_2,
 										char **columns, int **num_columns );
-
+int is_null(const char *value);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.

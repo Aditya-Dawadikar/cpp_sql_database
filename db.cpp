@@ -35,16 +35,16 @@ int main(int argc, char** argv){
     	rc = get_token(argv[1], &tok_list);
 
 		/* Test code */
-		// tok_ptr = tok_list;
+		tok_ptr = tok_list;
 		
-		// printf("%16s \t%s \t %s\n","token","class","value");
-		// printf("===================================================\n");
-		// while (tok_ptr != NULL)
-		// {
-		// 	printf("%16s \t%d \t %d\n",tok_ptr->tok_string, tok_ptr->tok_class,
-		// 		      tok_ptr->tok_value);
-		// 	tok_ptr = tok_ptr->next;
-		// }
+		printf("%16s \t%s \t %s\n","token","class","value");
+		printf("===================================================\n");
+		while (tok_ptr != NULL)
+		{
+			printf("%16s \t%d \t %d\n",tok_ptr->tok_string, tok_ptr->tok_class,
+				      tok_ptr->tok_value);
+			tok_ptr = tok_ptr->next;
+		}
 	
 		if (!rc)
 		{
@@ -928,43 +928,56 @@ int sem_insert_row(token_list *t_list){
     }
 
     // Step 6: Parse and validate values
-    record_ptr = record_buffer;
-    for (int i = 0; i < num_columns; i++, col_entry++)
-    {
-        // Expect value (either int or string)
+	record_ptr = record_buffer;
+    for (int i = 0; i < num_columns; i++, col_entry++) {
+		if (col_entry->not_null) {
+			if (is_null(cur->tok_string)) {  // `is_null` checks if the value is NULL or empty
+				fprintf(stderr, "Error: Column '%s' cannot be NULL.\n", col_entry->col_name);
+				return INVALID_STATEMENT;
+			}
+		}
 
-		printf("%s: ", col_entry->col_name);
-        if (cur->tok_value == INT_LITERAL && col_entry->col_type == T_INT)
-        {
-            int int_value = atoi(cur->tok_string);	// Convert String to integer
-            memcpy(record_ptr, &int_value, sizeof(int));
-			printf("(int) %d ", *(int*)record_ptr);
-			printf("\n");
-            record_ptr += sizeof(int);
-        }
-        else if (cur->tok_value == STRING_LITERAL && col_entry->col_type == T_CHAR)
-        {
-            if (strlen(cur->tok_string) > col_entry->col_len)
-            {
-                printf("Error: String value too long for column %s.\n", col_entry->col_name);
-                free(record_buffer);
-                fclose(tab_file);
-                return STRING_TOO_LONG;
-            }
-            memcpy(record_ptr, cur->tok_string, strlen(cur->tok_string));
-			memset(record_ptr + strlen(cur->tok_string), 0, col_entry->col_len - (strlen(cur->tok_string)));
-			printf(" (char*) %s ", (char*)record_ptr);
-			printf("\n");
-			record_ptr += col_entry->col_len;
-        }
-        else
-        {
-            // Type mismatch
-            printf("Error: Type mismatch for column %s.\n", col_entry->col_name);
-            free(record_buffer);
-            fclose(tab_file);
-            return TYPE_MISMATCH;
-        }
+		// Check if token is NULL for optional columns
+		if (is_null(cur->tok_string)) {
+			// Insert NULL placeholder based on column type
+			if (col_entry->col_type == T_INT) {
+				int null_value = -1; // Use -1 or 0 as NULL placeholder for integers
+				memcpy(record_ptr, &null_value, sizeof(int));
+				printf("(NULL int) %d\n", *(int*)record_ptr);
+				record_ptr += sizeof(int);
+			} else if (col_entry->col_type == T_CHAR) {
+				// Fill with zeros or spaces to indicate NULL
+				memset(record_ptr, 0, col_entry->col_len);
+				printf("(NULL char*) %s\n", (char*)record_ptr);
+				record_ptr += col_entry->col_len;
+			}
+		} else {
+			// Expect value (either int or string)
+			printf("%s: ", col_entry->col_name);
+			if (cur->tok_value == INT_LITERAL && col_entry->col_type == T_INT) {
+				int int_value = atoi(cur->tok_string);  // Convert String to integer
+				memcpy(record_ptr, &int_value, sizeof(int));
+				printf("(int) %d\n", *(int*)record_ptr);
+				record_ptr += sizeof(int);
+			} else if (cur->tok_value == STRING_LITERAL && col_entry->col_type == T_CHAR) {
+				if (strlen(cur->tok_string) > col_entry->col_len) {
+					printf("Error: String value too long for column %s.\n", col_entry->col_name);
+					free(record_buffer);
+					fclose(tab_file);
+					return STRING_TOO_LONG;
+				}
+				memcpy(record_ptr, cur->tok_string, strlen(cur->tok_string));
+				memset(record_ptr + strlen(cur->tok_string), 0, col_entry->col_len - strlen(cur->tok_string));
+				printf("(char*) %s\n", (char*)record_ptr);
+				record_ptr += col_entry->col_len;
+			} else {
+				// Type mismatch
+				printf("Error: Type mismatch for column %s.\n", col_entry->col_name);
+				free(record_buffer);
+				fclose(tab_file);
+				return TYPE_MISMATCH;
+			}
+		}
 
         // Expect ',' or ')'
         cur = cur->next;
@@ -2032,4 +2045,8 @@ int select_inner_join_tables(char *table_1,
 		Step 3: print mapped rows
 	 */
 	return 0;
+}
+
+int is_null(const char *value) {
+    return value == NULL || strcmp(value, "") == 0 || strcmp(value,"NULL")==0;
 }

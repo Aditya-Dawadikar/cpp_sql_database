@@ -107,7 +107,7 @@ DROP TABLE statement
 #### Syntax
 `INSERT INTO <table_name> VALUES ( <col_1_val>, <col_2_val>, ...)`
 
-#### Input Query
+#### Input Query 1
 `./db "insert into employee values (1001, 'Aditya', 'Dawadikar', 2001)"`
 
 #### Output
@@ -122,6 +122,29 @@ dept: (int) 2001
 Inserted 1 Row.
 
 ```
+
+#### Input Query 2
+`./db "insert into department values (NULL, 'Nvidia')"`
+#### Output
+```
+root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "insert into department values (NULL, 'Nvidia')"
+
+INSERT ROW statement
+Error: Column 'dept_id' cannot be NULL.
+```
+
+#### Input Query 3
+`./db "insert into department values ('2004', NULL)"`
+#### Output
+```
+root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "insert into department values ('2004', NULL)"
+
+INSERT ROW statement
+dept_id: (char*) 2004
+(NULL char*) 
+Inserted 1 Row.
+```
+
 
 ***
 
@@ -206,6 +229,5 @@ SELECT statement
 
 ## TODOs and Limitations
 1. DROP Table command does not delete `.tab` file, it only deletes data from `dbfile.bin` file.
-2. INSERT command does not handle `NOT NULL` constraint.
-3. NATURAL JOIN does not automatically detect columns with same names.
-4. NATURAL JOIN does not support `table.column` notation for columns list. Eg: `SELECT employee.f_name, department.dept_id FROM employee natural join department on employee.dept = department.dept_id` is `INVALID`. Thus column names must be unique across the database, but no check is added to ensure uniqueness across database.
+2. NATURAL JOIN does not automatically detect columns with same names.
+3. NATURAL JOIN does not support `table.column` notation for columns list. Eg: `SELECT employee.f_name, department.dept_id FROM employee natural join department on employee.dept = department.dept_id` is `INVALID`. Thus column names must be unique across the database, but no check is added to ensure uniqueness across database.
