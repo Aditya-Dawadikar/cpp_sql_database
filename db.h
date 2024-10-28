@@ -214,6 +214,7 @@ typedef enum error_return_codes
 	FILE_OPEN_ERROR = -299,			// -299
 	DBFILE_CORRUPTION,				// -298
 	MEMORY_ERROR,					// -297
+	FILE_DELETE_ERROR,				// -298
 	STRING_TOO_LONG = -1999,
 	TYPE_MISMATCH = -1899
 } return_codes;
@@ -240,6 +241,7 @@ int parse_inner_join_table_and_columns(token_list *tok_ptr, char *table_1, char 
 										int *num_columns_table_1, int *num_columns_table_2,
 										char **columns, int **num_columns );
 int is_null(const char *value);
+int delete_tab_file(tpd_entry *tpd);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.

@@ -680,6 +680,7 @@ int sem_drop_table(token_list *t_list){
 				rc = drop_tpd_from_list(cur->tok_string);
 
 				// Delete .tab file
+				rc = delete_tab_file(tab_entry);
 			}
 		}
 	}
@@ -1296,6 +1297,21 @@ int create_tab_file(tpd_entry *tpd){
 	fwrite(&table_header, sizeof(table_file_header), 1, tab_file);
 
 	fclose(tab_file);
+	return 0;
+}
+
+int delete_tab_file(tpd_entry *tpd){
+	char filename[MAX_IDENT_LEN + 5];  // +5 to accommodate ".tab\0"
+    snprintf(filename, sizeof(filename), "%s.tab", tpd->table_name);
+
+    // Remove the .tab file
+    if (remove(filename) == 0) {
+        printf("Table '%s' dropped successfully, and '%s' file deleted.\n", tpd->table_name, filename);
+    } else {
+        perror("Error deleting .tab file");  // Error message if deletion fails
+        return FILE_DELETE_ERROR;  // Return an error code (define FILE_DELETE_ERROR as needed)
+    }
+
 	return 0;
 }
 
