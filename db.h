@@ -121,7 +121,7 @@ typedef enum t_value
   	F_SUM,        	// 37
   	F_AVG,        	// 38
 	F_COUNT,      	// 39 - new function name should be added below this line
-	K_INNER,		// 40
+	K_NATURAL,		// 40
 	K_JOIN,			// 41
 	K_ON,			// 42
 	S_LEFT_PAREN = 70,		// 70
@@ -175,7 +175,7 @@ char *keyword_table[] =
   "sum",
   "avg",
   "count",
-  "inner",
+  "natural",
   "join",
   "on"
 };

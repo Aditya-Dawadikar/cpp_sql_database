@@ -1381,9 +1381,6 @@ int print_tab_file(char *table_name){
     free(record_buffer);
     fclose(tab_file);
 
-	
-	// printf("tab file read successfully\n");
-
     return 0;
 }
 
@@ -1450,6 +1447,14 @@ int sem_select_query_handler(token_list *t_list){
 }
 
 int select_from_table(char* table_name, char** columns, int num_columns_to_select) {
+
+	// Retrieve the table descriptor
+    tpd_entry *tpd = get_tpd_from_list(table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table descriptor not found for table %s\n", table_name);
+        return -1;
+    }
+
     // Open the .tab file
     char filename[MAX_IDENT_LEN + 5];
     sprintf(filename, "%s.tab", table_name);
@@ -1462,14 +1467,6 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
     // Read the table header
     table_file_header table_header;
     fread(&table_header, sizeof(table_file_header), 1, tab_file);
-
-    // Retrieve the table descriptor
-    tpd_entry *tpd = get_tpd_from_list(table_name);
-    if (!tpd) {
-        fprintf(stderr, "Error: Table descriptor not found for table %s\n", table_name);
-        fclose(tab_file);
-        return -1;
-    }
 
     int num_columns = tpd->num_columns;
     cd_entry *col_entry = (cd_entry*)((char*)tpd + tpd->cd_offset);
@@ -1508,12 +1505,6 @@ int select_from_table(char* table_name, char** columns, int num_columns_to_selec
 		printf("-----------------------"); // Adjust width to match column width
 	}
 	printf("\n");
-
-    // // Print headers
-    // for (int i = 0; i < num_columns_to_select; i++) {
-    //     printf("%s\t", columns[i]);
-    // }
-    // printf("\n---------------------------------------------\n");
 
     // Read and print each record
     char *record_buffer = (char *)malloc(table_header.record_size);
@@ -1572,7 +1563,7 @@ int has_inner_join(token_list *tok_ptr){
 	int k_inner_found = 0;
 	while(tok_ptr && tok_ptr->tok_value != EOC){
 		if (k_inner_found == 0){
-			if (tok_ptr->tok_value == K_INNER){
+			if (tok_ptr->tok_value == K_NATURAL){
 				k_inner_found = 1;
 			}
 			tok_ptr = tok_ptr->next;
@@ -1664,6 +1655,12 @@ int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **column
 			}
 		}
 
+		
+		if (col_count == 0){
+			perror("Expected * operator or list of columns after SELECT\n");
+			return INVALID_STATEMENT;
+		}
+
 		*num_columns = &col_count;
 
 		// Step 2: Parse the "FROM" keyword
@@ -1752,7 +1749,7 @@ int parse_inner_join_table_and_columns(token_list *tok_ptr,
 
 	// Step 4: Parse Inner Join clause
 	tok_ptr = tok_ptr->next;
-	if (!tok_ptr || tok_ptr->tok_value != K_INNER){
+	if (!tok_ptr || tok_ptr->tok_value != K_NATURAL){
 		perror("Syntax error: Expected INNER keyword after 'FROM'");
 		return INVALID_STATEMENT;
 	}
