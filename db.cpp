@@ -35,16 +35,16 @@ int main(int argc, char** argv){
     	rc = get_token(argv[1], &tok_list);
 
 		/* Test code */
-		tok_ptr = tok_list;
+		// tok_ptr = tok_list;
 		
-		printf("%16s \t%s \t %s\n","token","class","value");
-		printf("===================================================\n");
-		while (tok_ptr != NULL)
-		{
-			printf("%16s \t%d \t %d\n",tok_ptr->tok_string, tok_ptr->tok_class,
-				      tok_ptr->tok_value);
-			tok_ptr = tok_ptr->next;
-		}
+		// printf("%16s \t%s \t %s\n","token","class","value");
+		// printf("===================================================\n");
+		// while (tok_ptr != NULL)
+		// {
+		// 	printf("%16s \t%d \t %d\n",tok_ptr->tok_string, tok_ptr->tok_class,
+		// 		      tok_ptr->tok_value);
+		// 	tok_ptr = tok_ptr->next;
+		// }
 	
 		if (!rc)
 		{
@@ -678,6 +678,8 @@ int sem_drop_table(token_list *t_list){
 			{
 				/* Found a valid tpd, drop it from tpd list */
 				rc = drop_tpd_from_list(cur->tok_string);
+
+				// Delete .tab file
 			}
 		}
 	}
@@ -857,7 +859,6 @@ int sem_list_schema(token_list *t_list){
 }
 
 int sem_insert_row(token_list *t_list){
-	// printf("about to start insert operation\n");
 
     token_list *cur = t_list;
     tpd_entry *tpd;
@@ -1001,11 +1002,7 @@ int sem_insert_row(token_list *t_list){
 	
 	printf("Inserted 1 Row.\n");
 
-	// TODO: To be removed later. only use for debugging
-	int rc = 0;
-	cur = t_list;
-	rc = print_tab_file(cur->tok_string);
-	return rc;
+	return 0;
 }
 
 int initialize_tpd_list(){
@@ -1044,7 +1041,7 @@ int initialize_tpd_list(){
 			/* There is a valid dbfile.bin file - get file size */
 			//		_fstat(_fileno(fhandle), &file_stat);
 			fstat(fileno(fhandle), &file_stat);
-			printf("dbfile.bin size = %d\n", file_stat.st_size);
+			// printf("dbfile.bin size = %d\n", file_stat.st_size);
 
 			g_tpd_list = (tpd_list*)calloc(1, file_stat.st_size);
 
