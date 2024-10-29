@@ -1,5 +1,7 @@
 # C++ SQL Database
 
+Refer `sample_commands.txt` for build and test commands.
+
 ## Example Output
 ### Create Table
 

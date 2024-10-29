@@ -1,0 +1,35 @@
+Use the following commands to test the code after creating an executable of this code.
+
+Create Executable
+gcc -g -o db ./db.cpp
+
+Note: Assuming db.cpp and db.h both belong to the same folder inside a gcc container
+
+==============================================================================
+
+Create Test Tables
+./db "create table employee (emp_id int NOT NULL, f_name char(20), l_name char(20), dept char(20))"
+./db "create table department (dept_id char(20) NOT NULL, dept_name char(20))"
+
+Insert into Employee Table
+./db "insert into employee values (1001, 'Aditya', 'Dawadikar', '2001')"
+./db "insert into employee values (1002, 'Rudraksh', 'Naik', '2001')"
+./db "insert into employee values (1003, 'Shubhankar', 'Munshi', '2002')"
+./db "insert into employee values (1004, 'Mandar', 'Gondane', '2002')"
+
+Insert into Department Table
+./db "insert into department values ('2001', 'AWS')"
+./db "insert into department values ('2002', 'GCP')"
+
+Sample Select Queries
+./db "select * from employee"
+./db "select emp_id, f_name, l_name, dept from employee"
+./db "select * from department"
+./db "select dept_id, dept_name from department"
+./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"
+./db "select * from employee natural join department on dept = dept_id"
+
+Other commands
+./db "drop table course"
+./db "list table"
+./db "list schema for student"
