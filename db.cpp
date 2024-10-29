@@ -1742,7 +1742,15 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 								   int **num_columns)
 {
 
-	// Count Number of columns
+	// Step 1: Check if it's a SELECT * query
+	int is_select_all = 0;
+	if (tok_ptr && tok_ptr->tok_value == S_STAR)
+	{
+		is_select_all = 1;
+		tok_ptr = tok_ptr->next;
+	}
+
+	// Step 2: Parse the list of columns or check for the `*` operator
 	token_list *temp_ptr = tok_ptr;
 	int column_count = 0;
 	while (tok_ptr && tok_ptr->tok_value != K_FROM)
@@ -1752,51 +1760,49 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 			column_count++;
 		}
 
-		// Move to the next token (expect a comma or "FROM")
 		tok_ptr = tok_ptr->next;
 		if (tok_ptr && tok_ptr->tok_value == S_COMMA)
 		{
-			tok_ptr = tok_ptr->next; // Skip comma
+			tok_ptr = tok_ptr->next;
 		}
 	}
-	// Check FROM keyword
+
 	if (!tok_ptr || tok_ptr->tok_value != K_FROM)
 	{
 		perror("Syntax error: Expected 'FROM' keyword");
 		return INVALID_STATEMENT;
 	}
 
-	// Reset tok_ptr to the start
+	// Reset tok_ptr and prepare to assign columns if not SELECT *
 	tok_ptr = temp_ptr;
 	*num_columns = &column_count;
 
 	int i = 0;
-	// Extract columns
-	while (tok_ptr && tok_ptr->tok_value != K_FROM)
+	if (!is_select_all)
 	{
-		if (tok_ptr->tok_value == IDENT)
+		while (tok_ptr && tok_ptr->tok_value != K_FROM)
 		{
-			// Allocate space for column name and copy it
-			columns[i] = (char *)malloc(MAX_IDENT_LEN);
-			if (!columns[i])
+			if (tok_ptr->tok_value == IDENT)
 			{
-				perror("Memory allocation failed for column name");
-				return MEMORY_ERROR;
+				columns[i] = (char *)malloc(MAX_IDENT_LEN);
+				if (!columns[i])
+				{
+					perror("Memory allocation failed for column name");
+					return MEMORY_ERROR;
+				}
+				strncpy(columns[i], tok_ptr->tok_string, MAX_IDENT_LEN);
+				i++;
 			}
 
-			strncpy(columns[i], tok_ptr->tok_string, MAX_IDENT_LEN);
-			i++;
-		}
-
-		// Move to the next token (expect a comma or "FROM")
-		tok_ptr = tok_ptr->next;
-		if (tok_ptr && tok_ptr->tok_value == S_COMMA)
-		{
-			tok_ptr = tok_ptr->next; // Skip comma
+			tok_ptr = tok_ptr->next;
+			if (tok_ptr && tok_ptr->tok_value == S_COMMA)
+			{
+				tok_ptr = tok_ptr->next;
+			}
 		}
 	}
 
-	// Parse table_1 name
+	// Step 3: Parse table_1 name
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT)
 	{
@@ -1805,7 +1811,7 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	}
 	strncpy(table_1, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-	// Step Parse NATURAL JOIN clause
+	// Step 4: Parse NATURAL JOIN clause
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != K_NATURAL)
 	{
@@ -1819,24 +1825,24 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 		return INVALID_STATEMENT;
 	}
 
-	// Parse table_2 name
+	// Step 5: Parse table_2 name
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT)
 	{
-		perror("Syntax error: Expected table name after 'FROM'");
+		perror("Syntax error: Expected table name after 'JOIN'");
 		return INVALID_STATEMENT;
 	}
 	strncpy(table_2, tok_ptr->tok_string, MAX_IDENT_LEN);
 
-	// Parse ON keyword
+	// Step 6: Parse ON keyword and join column names
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != K_ON)
 	{
-		perror("Syntax error: Expected ON keyword after table_1 of INNER JOIN");
+		perror("Syntax error: Expected ON keyword after JOIN");
 		return INVALID_STATEMENT;
 	}
 
-	// Parse table_1.column
+	// Parse table_1 column
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT)
 	{
@@ -1849,11 +1855,11 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != S_EQUAL)
 	{
-		perror("Syntax error: Expected '=' symbol after columna name in INNER JOIN");
+		perror("Syntax error: Expected '=' symbol after column name in INNER JOIN");
 		return INVALID_STATEMENT;
 	}
 
-	// Parse table_2.column
+	// Parse table_2 column
 	tok_ptr = tok_ptr->next;
 	if (!tok_ptr || tok_ptr->tok_value != IDENT)
 	{
@@ -1870,48 +1876,80 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 		return INVALID_STATEMENT;
 	}
 
-	// Fetch table descriptors for both tables
+	// Step 7: Fetch table descriptors and join column metadata
 	tpd_entry *tpd1 = get_tpd_from_list(table_1);
 	tpd_entry *tpd2 = get_tpd_from_list(table_2);
-
 	if (!tpd1 || !tpd2)
 	{
 		fprintf(stderr, "Error: One or both tables do not exist.\n");
 		return TABLE_NOT_EXIST;
 	}
 
-	// Locate join columns in both tables
-	int join_col_offset_table1 = -1, join_col_offset_table2 = -1;
 	cd_entry *col_entry_1 = (cd_entry *)((char *)tpd1 + tpd1->cd_offset);
 	cd_entry *col_entry_2 = (cd_entry *)((char *)tpd2 + tpd2->cd_offset);
 	cd_entry *join_col_entry_1 = NULL, *join_col_entry_2 = NULL;
 
-	for (int i = 0; i < tpd1->num_columns; i++)
+	for (int j = 0; j < tpd1->num_columns; j++)
 	{
-		if (strcmp(col_entry_1[i].col_name, table_1_join_col) == 0)
+		if (strcmp(col_entry_1[j].col_name, table_1_join_col) == 0)
 		{
-			join_col_offset_table1 = i;
-			join_col_entry_1 = &col_entry_1[i];
+			join_col_entry_1 = &col_entry_1[j];
 			break;
 		}
 	}
-	for (int i = 0; i < tpd2->num_columns; i++)
+	for (int j = 0; j < tpd2->num_columns; j++)
 	{
-		if (strcmp(col_entry_2[i].col_name, table_2_join_col) == 0)
+		if (strcmp(col_entry_2[j].col_name, table_2_join_col) == 0)
 		{
-			join_col_offset_table2 = i;
-			join_col_entry_2 = &col_entry_2[i];
+			join_col_entry_2 = &col_entry_2[j];
 			break;
 		}
 	}
-
 	if (!join_col_entry_1 || !join_col_entry_2)
 	{
 		fprintf(stderr, "Error: Join columns not found in tables.\n");
 		return COLUMN_NOT_EXIST;
 	}
 
-	// Open files for both tables
+	// Step 8: Handle SELECT * by adding all columns from both tables, excluding duplicates in the join column
+	int col_index = 0;
+	if (is_select_all)
+	{
+		for (int i = 0; i < tpd1->num_columns; i++)
+		{
+			if (strcmp(col_entry_1[i].col_name, table_1_join_col) != 0)
+			{
+				columns[col_index] = (char *)malloc(MAX_IDENT_LEN);
+				strncpy(columns[col_index], col_entry_1[i].col_name, MAX_IDENT_LEN);
+				col_index++;
+			}
+		}
+		for (int i = 0; i < tpd2->num_columns; i++)
+		{
+			columns[col_index] = (char *)malloc(MAX_IDENT_LEN);
+			strncpy(columns[col_index], col_entry_2[i].col_name, MAX_IDENT_LEN);
+			col_index++;
+		}
+		*num_columns = &col_index;
+	}
+
+	printf("\n");
+	for (int c = 0; c < **num_columns; c++)
+	{
+		printf("-----------------------");
+	}
+	printf("\n| ");
+	for (int c = 0; c < **num_columns; c++)
+	{
+		printf("%-20s | ", columns[c]);
+	}
+	printf("\n");
+	for (int c = 0; c < **num_columns; c++)
+	{
+		printf("-----------------------");
+	}
+	printf("\n");
+
 	char filename1[MAX_IDENT_LEN + 5], filename2[MAX_IDENT_LEN + 5];
 	sprintf(filename1, "%s.tab", table_1);
 	sprintf(filename2, "%s.tab", table_2);
@@ -1923,7 +1961,6 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 		return FILE_OPEN_ERROR;
 	}
 
-	// Read headers and set up record buffers
 	table_file_header header1, header2;
 	fread(&header1, sizeof(table_file_header), 1, file1);
 	fread(&header2, sizeof(table_file_header), 1, file2);
@@ -1936,106 +1973,51 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 		return MEMORY_ERROR;
 	}
 
-	// Print separator line
-	for (int c = 0; c < **num_columns; c++)
-	{
-		printf("-----------------------"); // Adjust width to match column width
-	}
-	// Print headers
-	printf("\n| ");
-	for (int c = 0; c < **num_columns; c++)
-	{
-		printf("%-20s | ", columns[c]); // Adjust column width for alignment
-	}
-	printf("\n");
-
-	// Print separator line
-	for (int c = 0; c < **num_columns; c++)
-	{
-		printf("-----------------------"); // Adjust width to match column width
-	}
-	printf("\n");
-
-	// Iterate over records in table_1
 	for (int i = 0; i < header1.num_records; i++)
 	{
 		fread(record_buffer_1, header1.record_size, 1, file1);
 
-		// Get join column value from table_1
 		void *join_col_value1 = NULL;
-		// Calculate offset for join column in table_1
-		int offset = 0;
-		for (int k = 0; k < join_col_offset_table1; k++)
+		int offset1 = 0;
+		cd_entry *col_entry_1 = (cd_entry *)((char *)tpd1 + tpd1->cd_offset);
+		for (int k = 0; k < tpd1->num_columns; k++)
 		{
-			offset += col_entry_1[k].col_len; // Summing the lengths of preceding columns
-		}
-		char *join_col_ptr1 = record_buffer_1 + offset;
-		if (join_col_entry_1->col_type == T_INT)
-		{
-			// Allocate memory for integer type and copy value
-			join_col_value1 = malloc(sizeof(int));
-			if (join_col_value1)
+			if (strcmp(col_entry_1[k].col_name, table_1_join_col) == 0)
 			{
-				memcpy(join_col_value1, join_col_ptr1, sizeof(int)); // `join_col_value1` should now hold `2001`
+				for (int j = 0; j < k; j++)
+				{
+					offset1 += col_entry_1[j].col_len;
+				}
+				break;
 			}
 		}
-		else if (join_col_entry_1->col_type == T_CHAR)
-		{
-			// Allocate memory for char array type and copy value
-			join_col_value1 = malloc(join_col_entry_1->col_len + 1); // +1 for null-termination
-			if (join_col_value1)
-			{
-				strncpy((char *)join_col_value1, join_col_ptr1, join_col_entry_1->col_len);
-				((char *)join_col_value1)[join_col_entry_1->col_len] = '\0'; // Ensure null-terminated string
-			}
-		}
+		join_col_value1 = record_buffer_1 + offset1;
 
-		// Iterate over records in table_2
-		fseek(file2, sizeof(table_file_header), SEEK_SET); // Reset to start of table_2
+		fseek(file2, sizeof(table_file_header), SEEK_SET);
 		for (int j = 0; j < header2.num_records; j++)
 		{
 			fread(record_buffer_2, header2.record_size, 1, file2);
 
-			// Get join column value from table_2
 			void *join_col_value2 = NULL;
-
-			// Calculate offset for join column in table_2
 			int offset2 = 0;
-			for (int k = 0; k < join_col_offset_table2; k++)
+			cd_entry *col_entry_2 = (cd_entry *)((char *)tpd2 + tpd2->cd_offset);
+			for (int k = 0; k < tpd2->num_columns; k++)
 			{
-				offset2 += col_entry_2[k].col_len; // Summing the lengths of preceding columns
-			}
-
-			// Access join column in record_buffer_2 using calculated offset
-			char *join_col_ptr2 = record_buffer_2 + offset2;
-
-			if (join_col_entry_2->col_type == T_INT)
-			{
-				// Allocate memory for integer type and copy value
-				join_col_value2 = malloc(sizeof(int));
-				if (join_col_value2)
+				if (strcmp(col_entry_2[k].col_name, table_2_join_col) == 0)
 				{
-					memcpy(join_col_value2, join_col_ptr2, sizeof(int)); // `join_col_value2` should now hold the correct integer value
+					for (int l = 0; l < k; l++)
+					{
+						offset2 += col_entry_2[l].col_len;
+					}
+					break;
 				}
 			}
-			else if (join_col_entry_2->col_type == T_CHAR)
-			{
-				// Allocate memory for char array type and copy value
-				join_col_value2 = malloc(join_col_entry_2->col_len + 1); // +1 for null-termination
-				if (join_col_value2)
-				{
-					strncpy((char *)join_col_value2, join_col_ptr2, join_col_entry_2->col_len);
-					((char *)join_col_value2)[join_col_entry_2->col_len] = '\0'; // Ensure null-terminated string
-				}
-			}
+			join_col_value2 = record_buffer_2 + offset2;
 
-			// Compare join column values and print if they match
 			if (((join_col_entry_1->col_type == T_INT && join_col_entry_2->col_type == T_INT) && *(int *)join_col_value1 == *(int *)join_col_value2) ||
 				((join_col_entry_1->col_type == T_CHAR && join_col_entry_2->col_type == T_CHAR) && strcmp((char *)join_col_value1, (char *)join_col_value2) == 0))
 			{
-
 				printf("| ");
-				// Print matched columns from both tables based on the `columns` array
 				for (int c = 0; c < **num_columns; c++)
 				{
 					int col_offset = 0;
@@ -2043,16 +2025,12 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 					cd_entry *col_entry = NULL;
 					int is_table1_column = 0;
 
-					// Check if the column is in table_1 or table_2
 					for (int k = 0; k < tpd1->num_columns; k++)
 					{
-						// printf("here4\n");
 						if (strcmp(columns[c], col_entry_1[k].col_name) == 0)
 						{
 							is_table1_column = 1;
 							col_entry = &col_entry_1[k];
-
-							// Calculate offset in record_buffer_1 for this column
 							for (int l = 0; l < k; l++)
 							{
 								col_offset += col_entry_1[l].col_len;
@@ -2062,14 +2040,11 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 					}
 					if (!is_table1_column)
 					{
-						// Column is from table_2
 						for (int k = 0; k < tpd2->num_columns; k++)
 						{
 							if (strcmp(columns[c], col_entry_2[k].col_name) == 0)
 							{
 								col_entry = &col_entry_2[k];
-
-								// Calculate offset in record_buffer_2 for this column
 								for (int l = 0; l < k; l++)
 								{
 									col_offset += col_entry_2[l].col_len;
@@ -2081,7 +2056,6 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 
 					if (col_entry)
 					{
-						// Determine the value pointer based on column location (table_1 or table_2)
 						if (is_table1_column)
 						{
 							value_ptr = record_buffer_1 + col_offset;
@@ -2091,37 +2065,32 @@ int handle_inner_join_select_query(token_list *tok_ptr,
 							value_ptr = record_buffer_2 + col_offset;
 						}
 
-						// Print the value based on column type
 						if (col_entry->col_type == T_INT)
 						{
 							int int_value;
 							memcpy(&int_value, value_ptr, sizeof(int));
 							printf("%-20d | ", int_value);
-							// printf("%d\t", int_value);
 						}
 						else if (col_entry->col_type == T_CHAR)
 						{
 							char char_value[MAX_IDENT_LEN + 1] = {0};
 							strncpy(char_value, (char *)value_ptr, col_entry->col_len);
-							char_value[col_entry->col_len] = '\0'; // Ensure null-termination for safe printing
-							// printf("%s\t", char_value);
+							char_value[col_entry->col_len] = '\0';
 							printf("%-20s | ", char_value);
 						}
 					}
 				}
-				printf("\n"); // Move to the next line after printing each joined row
+				printf("\n");
 			}
 		}
 	}
 
-	// Print separator line
 	for (int c = 0; c < **num_columns; c++)
 	{
-		printf("-----------------------"); // Adjust width to match column width
+		printf("-----------------------");
 	}
 	printf("\n");
 
-	// Cleanup
 	free(record_buffer_1);
 	free(record_buffer_2);
 	fclose(file1);
