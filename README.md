@@ -225,9 +225,24 @@ SELECT statement
 --------------------------------------------------------------------------------------------
 ```
 
+##### Query
+`./db "select * from employee natural join department on dept = dept_id"`
+##### Output
+```
+root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "select * from employee natural join department on dept=dept_id"
+
+SELECT statement
+
+-------------------------------------------------------------------------------------------------------------------
+| emp_id               | f_name               | l_name               | dept_id              | dept_name            | 
+-------------------------------------------------------------------------------------------------------------------
+| 1001                 | Aditya               | Dawadikar            | 2001                 | AWS                  | 
+| 1003                 | Shubhankar           | Munshi               | 2002                 | GCP                  | 
+-------------------------------------------------------------------------------------------------------------------
+```
+
 ***
 
 ## TODOs and Limitations
 1. NATURAL JOIN does not automatically detect columns with same names.
 2. NATURAL JOIN does not support `table.column` notation for columns list. Eg: `SELECT employee.f_name, department.dept_id FROM employee natural join department on employee.dept = department.dept_id` is `INVALID`. Thus column names must be unique across the database, but no check is added to ensure uniqueness across database.
-3. NATURAL JOIN does not support `*` (Select all) operation.
