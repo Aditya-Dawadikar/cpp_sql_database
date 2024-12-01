@@ -2,6 +2,7 @@
 db.h - This file contains all the structures, defines, and function
 	prototype for the db.exe program.
 *********************************************************************/
+#include <cstdio>
 
 #define MAX_IDENT_LEN 16
 #define MAX_NUM_COL 16
@@ -9,6 +10,9 @@ db.h - This file contains all the structures, defines, and function
 #define KEYWORD_OFFSET 10
 #define STRING_BREAK " (),<>="
 #define NUMBER_BREAK " ),"
+#define MAX_NUM_CONDITIONS 10
+#define DELETE_FLAG_SIZE 1  // Delete flag is 1 byte
+
 
 /* Column descriptor sturcture = 20+4+4+4+4 = 36 bytes */
 typedef struct cd_entry_def
@@ -66,6 +70,25 @@ typedef struct tab_file_header_def
 	int file_header_flag;
 	tpd_entry *tpd_ptr;
 } table_file_header;
+
+typedef struct {
+    char **data;      // Array of strings, where each string represents a single row of data
+    int num_rows;     // Number of rows in the result set
+    int num_columns;  // Number of columns in the result set
+} table_data;
+
+typedef struct {
+    char left_operand[MAX_TOK_LEN];
+    char op[MAX_TOK_LEN];
+    char right_operand[MAX_TOK_LEN];
+} query_condition;
+
+typedef struct {
+    const char *table_name;   // Name of the table
+    const char *column_name;  // Column name
+    int col_offset;           // Offset of the column within the row
+} column_mapping;
+
 
 /* This enum defines the different classes of tokens for
 	 semantic processing. */
@@ -130,6 +153,8 @@ typedef enum t_value
 	S_EQUAL,		   // 74
 	S_LESS,			   // 75
 	S_GREATER,		   // 76
+	S_GREATER_EQUAL,   // 77
+	S_LESS_EQUAL,	   // 78
 	IDENT = 85,		   // 85
 	INT_LITERAL = 90,  // 90
 	STRING_LITERAL,	   // 91
@@ -214,7 +239,8 @@ typedef enum error_return_codes
 	MEMORY_ERROR,			   // -297
 	FILE_DELETE_ERROR,		   // -298
 	STRING_TOO_LONG = -1999,
-	TYPE_MISMATCH = -1899
+	TYPE_MISMATCH = -1899,
+	SYNTAX_ERROR = -1799,
 } return_codes;
 
 /* Set of function prototypes */
@@ -229,15 +255,112 @@ int sem_list_schema(token_list *t_list);
 int sem_insert_row(token_list *t_list);
 int create_tab_file(tpd_entry *tpd);
 int print_tab_file(char *table_name);
-int select_from_table(char *table_name, char **columns, int num_columns_to_select);
-int parse_table_and_columns(token_list *tok_ptr, char *table_name, char **columns, int **num_columns);
-int sem_select_query_handler(token_list *t_list);
-int has_inner_join(token_list *tok_ptr);
-int handle_inner_join_select_query(token_list *tok_ptr, char *table_1, char *table_2,
-								   char *table_1_join_col, char *table_2_join_col,
-								   char **columns, int **num_columns);
 int is_null(const char *value);
 int delete_tab_file(tpd_entry *tpd);
+int sem_insert_row(const char *table_name, const char *row_data);
+
+int sem_select_query_handler(token_list *tok_list);
+void parse_select_all_query(token_list *tok_list,
+							char *table_name,
+							query_condition *conditions,
+							int *num_conditions,
+							char *logical_operators);
+void parse_select_columns_query(token_list *tok_list,
+								char *table_name,
+								char **column_list,
+								int *num_columns,
+								query_condition *conditions,
+								int *num_conditions,
+								char *logical_operators);
+void parse_inner_join_query(token_list *tok_list,
+							char *table_name1,
+							char *table_name2,
+							char **column_list,
+							int *num_columns,
+							query_condition *conditions,
+							int *num_conditions,
+							char *logical_operators);
+void handle_select_all(const char *table_name,
+						query_condition *conditions,
+						int num_conditions,
+						char *logical_operators);
+void handle_select_columns(const char *table_name,
+							char **column_list,
+							int num_columns,
+							query_condition *conditions,
+							int num_conditions,
+							char *logical_operators);
+void handle_select_inner_join(const char *table_name1,
+								const char *table_name2,
+								char **column_list,
+								int num_columns,
+								query_condition *conditions,
+								int num_conditions,
+								char *logical_operators,
+								token_list *on_clause_tokens);
+void print_table(const char **column_list,
+					int num_columns,
+					const table_data *data);
+table_data *perform_inner_join(const char *table1,
+								const char *table2,
+								const char *join_col1,
+								const char *join_col2,
+								const char **select_columns,
+								int num_columns,
+								query_condition *conditions,
+								int num_conditions,
+								char *logical_operators
+							);
+
+table_data *fetch_records(const char *table_name,
+							const char **column_list,
+							int num_columns,
+							query_condition *conditions,
+							int num_conditions,
+							char *logical_operators);
+int evaluate_conditions(const char *record,
+						cd_entry *columns,
+						query_condition *conditions,
+						int num_conditions,
+						char *logical_operators);
+char *merge_rows(const char *row1,
+                 const char *row2,
+                 const char **select_columns,
+                 int num_columns,
+                 cd_entry *columns1,
+                 int num_columns1,
+                 cd_entry *columns2,
+                 int num_columns2);
+int find_column_offset(const char *col_name,
+						cd_entry *columns,
+						int num_columns);
+void parse_on_clause(token_list *tok_list,
+						char *join_col1,
+						char *join_col2);
+void parse_where_clause(token_list *tok_list,
+						query_condition *conditions,
+						int *num_conditions,
+						char *logical_operators);
+int is_select_all_query(token_list *tok_list);
+int is_inner_join_query(token_list *tok_list);
+token_list *extract_on_clause(token_list *tok_list);
+void mark_row_deleted(FILE *file,
+						int row_index,
+						int record_size);
+void fetch_and_print_records(const char *table_name,
+								const char **column_list,
+								int num_columns,
+								query_condition *conditions,
+								int num_conditions,
+								char *logical_operators);
+char **get_all_columns_from_table(const tpd_entry *tpd, int *num_columns);
+void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
+                               const char *join_col1, const char *join_col2,
+                               column_mapping *validated_columns, int num_columns,
+                               query_condition *conditions, int num_conditions, char *logical_operators);
+void validate_columns_for_join(const char **requested_columns, int num_requested_columns,
+                               column_mapping *validated_columns, const char *table_name1,
+                               const char *table_name2);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.
