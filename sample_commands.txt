@@ -29,6 +29,8 @@ Sample Select Queries
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"
 ./db "select * from employee natural join department on dept = dept_id"
 
+./db "delete from employee where emp_id=1001"
+
 Other commands
 ./db "drop table course"
 ./db "list table"

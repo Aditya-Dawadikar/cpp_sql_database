@@ -357,7 +357,11 @@ int do_semantic(token_list *tok_list)
 		printf("SELECT statement\n");
 		cur_cmd = SELECT;
 		cur = cur->next;
-	}
+	}else if ((cur->tok_value == K_DELETE) && (cur->next != NULL)){
+        printf("DELETE statement\n");
+        cur_cmd = DELETE;
+        cur = cur->next;
+    }
 	else
 	{
 		printf("Invalid statement\n");
@@ -386,6 +390,9 @@ int do_semantic(token_list *tok_list)
 		case SELECT:
 			rc = sem_select_query_handler(cur);
 			break;
+        case DELETE:
+            rc = sem_delete_row(cur);
+            break;
 		default:; /* no action */
 		}
 	}
@@ -1816,7 +1823,6 @@ table_data *fetch_records(const char *table_name, const char **column_list, int 
         }
 
         if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
-
 			int row_size = DELETE_FLAG_SIZE;
             for (int j = 0; j < num_columns; j++) {
                 row_size += columns[j].col_len;
@@ -2195,4 +2201,84 @@ token_list *extract_on_clause(token_list *tok_list) {
 
     fprintf(stderr, "Error: ON clause not found in INNER JOIN query.\n");
     return NULL;
+}
+
+/*************************************************************
+	Utility Function to delete rows
+ *************************************************************/
+int sem_delete_row(token_list *t_list) {
+    char table_name[MAX_IDENT_LEN];
+    token_list *cur = t_list;
+
+    // Step 1: Expect "FROM" keyword
+    if (cur == NULL || cur->tok_value != K_FROM) {
+        fprintf(stderr, "Error: Expected 'FROM' keyword after 'DELETE'.\n");
+        return SYNTAX_ERROR;
+    }
+    cur = cur->next;
+
+    // Step 2: Parse table name
+    if (cur->tok_class != keyword && cur->tok_class != identifier) {
+        fprintf(stderr, "Error: Invalid table name.\n");
+        return INVALID_TABLE_NAME;
+    }
+
+    strncpy(table_name, cur->tok_string, MAX_IDENT_LEN);
+    cur = cur->next;
+
+    // Step 3: Parse conditions if present
+    query_condition conditions[MAX_NUM_CONDITIONS];
+    int num_conditions = 0;
+    char logical_operators[MAX_NUM_CONDITIONS] = {0};
+    memset(logical_operators, 'A', sizeof(logical_operators));
+
+    if (cur && cur->tok_value == K_WHERE) {
+        cur = cur->next;
+        parse_where_clause(cur, conditions, &num_conditions, logical_operators);
+    }
+
+    // Step 4: Open the table file
+    tpd_entry *tpd = get_tpd_from_list((char *)table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table '%s' does not exist.\n", table_name);
+        return TABLE_NOT_EXIST;
+    }
+
+    char filename[MAX_IDENT_LEN + 5];
+    sprintf(filename, "%s.tab", table_name);
+
+    FILE *file = fopen(filename, "r+b");
+    if (!file) {
+        fprintf(stderr, "Error: Could not open file %s\n", filename);
+        return FILE_OPEN_ERROR;
+    }
+
+    // Step 5: Read table header
+    table_file_header header;
+    fread(&header, sizeof(table_file_header), 1, file);
+
+    // Step 6: Evaluate rows and mark as deleted
+    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
+    char *record = (char *)malloc(header.record_size);
+
+    for (int i = 0; i < header.num_records; i++) {
+        fseek(file, sizeof(table_file_header) + i * header.record_size, SEEK_SET);
+        fread(record, header.record_size, 1, file);
+
+        if (record[0] == 1) { // Skip already deleted rows
+            continue;
+        }
+
+        // if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators, tpd->num_columns)) {
+        if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
+            // Mark the row as deleted
+            printf("Marking row %d as deleted\n", i);
+            mark_row_deleted(file, i, header.record_size);
+        }
+    }
+
+    free(record);
+    fclose(file);
+
+    return 0;
 }
