@@ -361,6 +361,10 @@ int do_semantic(token_list *tok_list)
         printf("DELETE statement\n");
         cur_cmd = DELETE;
         cur = cur->next;
+    }else if((cur->tok_value == K_UPDATE) && (cur->next != NULL)){
+        printf("UPDATE statement\n");
+        cur_cmd = UPDATE;
+        cur = cur->next;
     }
 	else
 	{
@@ -392,6 +396,9 @@ int do_semantic(token_list *tok_list)
 			break;
         case DELETE:
             rc = sem_delete_row(cur);
+            break;
+        case UPDATE:
+            rc = sem_update_row(cur);
             break;
 		default:; /* no action */
 		}
@@ -2280,5 +2287,180 @@ int sem_delete_row(token_list *t_list) {
     free(record);
     fclose(file);
 
+    return 0;
+}
+
+/*************************************************************
+	Utility Function to update rows
+ *************************************************************/
+int sem_update_row(token_list *t_list) {
+    char table_name[MAX_IDENT_LEN];
+    token_list *cur = t_list;
+    tpd_entry *tpd;
+
+    // Step 1: Parse table name
+    if ((cur->tok_class != keyword) && (cur->tok_class != identifier)) {
+        fprintf(stderr, "Error: Invalid table name.\n");
+        return INVALID_TABLE_NAME;
+    }
+
+    strncpy(table_name, cur->tok_string, MAX_IDENT_LEN);
+    cur = cur->next;
+
+    tpd = get_tpd_from_list(table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table '%s' does not exist.\n", table_name);
+        return TABLE_NOT_EXIST;
+    }
+
+    // Step 2: Expect 'SET' clause
+    if (cur->tok_value != K_SET) {
+        fprintf(stderr, "Error: Expected 'SET' keyword.\n");
+        return SYNTAX_ERROR;
+    }
+    cur = cur->next;
+
+    // Step 3: Parse columns and new values
+    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
+    char update_columns[MAX_NUM_COL][MAX_IDENT_LEN];
+    char update_values[MAX_NUM_COL][MAX_TOK_LEN];
+    int update_offsets[MAX_NUM_COL];
+    int num_updates = 0;
+
+    while (cur && cur->tok_value != K_WHERE && cur->tok_value != EOC) {
+        // Parse column name
+        if (cur->tok_class != identifier) {
+            fprintf(stderr, "Error: Expected column name in SET clause.\n");
+            return INVALID_COLUMN_NAME;
+        }
+        strncpy(update_columns[num_updates], cur->tok_string, MAX_IDENT_LEN);
+
+        // Parse '='
+        cur = cur->next;
+        if (!cur || cur->tok_value != S_EQUAL) {
+            fprintf(stderr, "Error: Expected '=' in SET clause.\n");
+            return SYNTAX_ERROR;
+        }
+        cur = cur->next;
+
+        // Parse value
+        if (!cur || (cur->tok_class != constant && cur->tok_value != STRING_LITERAL)) {
+            fprintf(stderr, "Error: Invalid value in SET clause.\n");
+            return TYPE_MISMATCH;
+        }
+        strncpy(update_values[num_updates], cur->tok_string, MAX_TOK_LEN);
+
+        // Find column offset
+        bool column_found = false;
+        int offset = DELETE_FLAG_SIZE; // Start after the delete flag
+        for (int i = 0; i < tpd->num_columns; i++) {
+            if (strcmp(columns[i].col_name, update_columns[num_updates]) == 0) {
+                update_offsets[num_updates] = offset;
+                column_found = true;
+                break;
+            }
+            offset += columns[i].col_len;
+        }
+        if (!column_found) {
+            fprintf(stderr, "Error: Column '%s' not found in table '%s'.\n", update_columns[num_updates], table_name);
+            return COLUMN_NOT_EXIST;
+        }
+
+        num_updates++;
+        cur = cur->next;
+        if (cur && cur->tok_value == S_COMMA) {
+            cur = cur->next;
+        }
+    }
+
+    // Step 4: Parse WHERE clause
+    query_condition conditions[MAX_NUM_CONDITIONS];
+    int num_conditions = 0;
+    char logical_operators[MAX_NUM_CONDITIONS];
+    memset(logical_operators, 'A', sizeof(logical_operators)); // Default to AND
+
+    if (cur && cur->tok_value == K_WHERE) {
+        cur = cur->next;
+        parse_where_clause(cur, conditions, &num_conditions, logical_operators);
+    }
+
+    // Step 5: Open the table file
+    char filename[MAX_IDENT_LEN + 5];
+    sprintf(filename, "%s.tab", table_name);
+
+    FILE *file = fopen(filename, "r+b");
+    if (!file) {
+        fprintf(stderr, "Error: Could not open file %s\n", filename);
+        return FILE_OPEN_ERROR;
+    }
+
+    // Step 6: Read table header
+    table_file_header header;
+    fread(&header, sizeof(table_file_header), 1, file);
+
+    // Step 7: Iterate through records and update matching rows
+    char *record = (char *)malloc(header.record_size);
+    int updated_rows = 0;
+
+    for (int i = 0; i < header.num_records; i++) {
+        fseek(file, sizeof(table_file_header) + i * header.record_size, SEEK_SET);
+        fread(record, header.record_size, 1, file);
+
+        if (record[0] == 1) { // Skip deleted rows
+            continue;
+        }
+
+        // Evaluate conditions
+        if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
+            printf("Row %d matches the conditions.\n", i);
+
+            // Update the record
+            for (int j = 0; j < num_updates; j++) {
+                int offset = update_offsets[j]; // Fetch the pre-computed offset
+                const char *column_name = update_columns[j];
+
+                // Find the column type in schema
+                cd_entry *target_column = NULL;
+                for (int k = 0; k < tpd->num_columns; k++) {
+                    if (strcasecmp(columns[k].col_name, column_name) == 0) {
+                        target_column = &columns[k];
+                        break;
+                    }
+                }
+
+                if (!target_column) {
+                    fprintf(stderr, "Error: Column '%s' not found in table schema.\n", column_name);
+                    continue; // Skip this update if column is not found
+                }
+
+                printf("Updating column '%s' in row %d with value: %s\n", column_name, i, update_values[j]);
+
+                // Perform the update based on column type
+                if (target_column->col_type == T_INT) {
+                    int value = atoi(update_values[j]);
+                    memcpy(record + offset, &value, sizeof(int));
+                } else if (target_column->col_type == T_CHAR) {
+                    // Copy string value and ensure null termination
+                    strncpy(record + offset, update_values[j], target_column->col_len);
+                    if (strlen(update_values[j]) < target_column->col_len) {
+                        memset(record + offset + strlen(update_values[j]), '\0', target_column->col_len - strlen(update_values[j]));
+                    }
+                }
+            }
+
+            // Write the updated record back to the file
+            fseek(file, sizeof(table_file_header) + i * header.record_size, SEEK_SET);
+            fwrite(record, header.record_size, 1, file);
+
+            updated_rows++;
+        }
+    }
+
+
+    free(record);
+    fclose(file);
+
+    // Step 8: Report the result
+    printf("UPDATE statement: %d row(s) updated.\n", updated_rows);
     return 0;
 }
