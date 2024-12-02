@@ -298,9 +298,6 @@ void handle_select_inner_join(const char *table_name1,
 								int num_conditions,
 								char *logical_operators,
 								token_list *on_clause_tokens);
-void print_table(const char **column_list,
-					int num_columns,
-					const table_data *data);
 table_data *perform_inner_join(const char *table1,
 								const char *table2,
 								const char *join_col1,
@@ -323,6 +320,10 @@ int evaluate_conditions(const char *record,
 						query_condition *conditions,
 						int num_conditions,
 						char *logical_operators);
+int evaluate_conditions_join(const char *record,
+							 cd_entry *columns1, int num_columns1, int record_size1,
+                             cd_entry *columns2, int num_columns2, int record_size2,
+                             query_condition *conditions, int num_conditions, char *logical_operators);
 char *merge_rows(const char *row1,
                  const char *row2,
                  const char **select_columns,
@@ -356,7 +357,8 @@ void fetch_and_print_records(const char *table_name,
 char **get_all_columns_from_table(const tpd_entry *tpd, int *num_columns);
 void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                                const char *join_col1, const char *join_col2,
-                               column_mapping *validated_columns, int num_columns,
+                               column_mapping *validated_columns, int num_validated_columns,
+                               const char **original_column_list, int num_columns,
                                query_condition *conditions, int num_conditions, char *logical_operators);
 void validate_columns_for_join(const char **requested_columns, int num_requested_columns,
                                column_mapping *validated_columns, const char *table_name1,
