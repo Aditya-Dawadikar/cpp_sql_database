@@ -362,6 +362,7 @@ void validate_columns_for_join(const char **requested_columns, int num_requested
                                column_mapping *validated_columns, const char *table_name1,
                                const char *table_name2);
 int sem_delete_row(token_list *t_list);
+int sem_update_row(token_list *t_list);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.
