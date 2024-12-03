@@ -1937,7 +1937,7 @@ int evaluate_conditions(const char *record, cd_entry *columns, query_condition *
         return 1; // No conditions mean all rows satisfy the query
     }
 
-	int result = (logical_operators[0] == 'O') ? 0 : 1; // Initial result based on the first operator (AND/OR)
+	int result = 1;
 
     for (int i = 0; i < num_conditions; i++) {
         query_condition *cond = &conditions[i];
@@ -1989,9 +1989,12 @@ int evaluate_conditions(const char *record, cd_entry *columns, query_condition *
         }
 
         // Combine condition results using logical operators
-        if (logical_operators[i] == 'A') {
+        if (i==0){
+            // first condition always AND with true
+            result = result && condition_result;
+        }else if (logical_operators[i-1] == 'A') {
             result = result && condition_result; // AND
-        } else if (logical_operators[i] == 'O') {
+        } else if (logical_operators[i-1] == 'O') {
             result = result || condition_result; // OR
         }
     }
@@ -2007,7 +2010,7 @@ int evaluate_conditions_join(const char *record,
         return 1; // No conditions mean all rows satisfy the query
     }
 
-    int result = (logical_operators[0] == 'O') ? 0 : 1;
+    int result = 1;
 
     for (int i = 0; i < num_conditions; i++) {
         query_condition *cond = &conditions[i];
@@ -2082,9 +2085,12 @@ int evaluate_conditions_join(const char *record,
                                (strcmp(op, ">=") == 0 && strcmp(record_value, value) >= 0);
         }
 
-        if (logical_operators[i] == 'A') {
+        if (i==0){
+            // first condition always AND with true
             result = result && condition_result;
-        } else if (logical_operators[i] == 'O') {
+        }else if (logical_operators[i-1] == 'A') {
+            result = result && condition_result;
+        } else if (logical_operators[i-1] == 'O') {
             result = result || condition_result;
         }
     }
