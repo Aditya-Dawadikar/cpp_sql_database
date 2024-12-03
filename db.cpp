@@ -1280,10 +1280,26 @@ int sem_select_query_handler(token_list *tok_list) {
         handle_select_inner_join(table_name1, table_name2, column_list, num_columns, conditions, num_conditions, logical_operators, on_clause_tokens);
     } else if (is_select_all_query(tok_list)) {
         parse_select_all_query(tok_list, table_name1, conditions, &num_conditions, logical_operators);
-        handle_select_all(table_name1, conditions, num_conditions, logical_operators);
+
+        // Extract ORDER BY parameters
+        char order_by_col[MAX_IDENT_LEN] = {0};
+        bool desc = false;
+        parse_order_by_clause(tok_list, order_by_col, &desc);
+
+        // Call handle_select_all with ORDER BY parameters
+        handle_select_all(table_name1, conditions, num_conditions, logical_operators, order_by_col, desc);
+
     } else {
         parse_select_columns_query(tok_list, table_name1, column_list, &num_columns, conditions, &num_conditions, logical_operators);
-        handle_select_columns(table_name1, column_list, num_columns, conditions, num_conditions, logical_operators);
+
+        // Extract ORDER BY parameters
+        char order_by_col[MAX_IDENT_LEN] = {0};
+        bool desc = false;
+        parse_order_by_clause(tok_list, order_by_col, &desc);
+
+        // Call handle_select_columns with ORDER BY parameters
+        handle_select_columns(table_name1, column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+
     }
 
     return 0;
@@ -1428,7 +1444,11 @@ void parse_inner_join_query(token_list *tok_list, char *table_name1, char *table
 
 }
 
-void handle_select_all(const char *table_name, query_condition *conditions, int num_conditions, char *logical_operators) {
+void handle_select_all(const char *table_name,
+                        query_condition *conditions,
+                        int num_conditions,
+                        char *logical_operators,
+                        const char *order_by_col, bool desc) {
     tpd_entry *tpd = get_tpd_from_list((char *)table_name);
 	if (!tpd) {
 		fprintf(stderr, "Error: Table '%s' not found.\n", table_name);
@@ -1445,14 +1465,21 @@ void handle_select_all(const char *table_name, query_condition *conditions, int 
     }
 
 	// Call the fetch and print function
-    fetch_and_print_records(table_name, (const char **)column_list, tpd->num_columns, conditions, num_conditions, logical_operators);
+    fetch_and_print_records(table_name, (const char **)column_list, tpd->num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
 
     // Free allocated resources
     free(column_list);
 
 }
 
-void handle_select_columns(const char *table_name, char **column_list, int num_columns, query_condition *conditions, int num_conditions, char *logical_operators) {
+void handle_select_columns(const char *table_name,
+                            char **column_list,
+                            int num_columns,
+                            query_condition *conditions,
+                            int num_conditions,
+                            char *logical_operators,
+                            const char *order_by_col,
+                            bool desc) {
     // Fetch table metadata
     tpd_entry *tpd = get_tpd_from_list((char *)table_name);
     if (!tpd) {
@@ -1478,7 +1505,7 @@ void handle_select_columns(const char *table_name, char **column_list, int num_c
     }
 
     // Call fetch_and_print_records with the specific columns
-    fetch_and_print_records(table_name, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators);
+    fetch_and_print_records(table_name, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
 }
 
 void handle_select_inner_join(const char *table_name1, const char *table_name2, char **column_list, int num_columns,
@@ -1854,9 +1881,7 @@ void mark_row_deleted(FILE *file, int row_index, int record_size) {
     fwrite(&flag, DELETE_FLAG_SIZE, 1, file);
 }
 
-void fetch_and_print_records(const char *table_name, const char **column_list, int num_columns, query_condition *conditions, int num_conditions, char *logical_operators) {
-    // Open the table file
-	int rc=0;
+void fetch_and_print_records(const char *table_name, const char **column_list, int num_columns, query_condition *conditions, int num_conditions, char *logical_operators, const char *order_by_col, bool desc) {
     char filename[MAX_IDENT_LEN + 5];
     sprintf(filename, "%s.tab", table_name);
 
@@ -1869,33 +1894,52 @@ void fetch_and_print_records(const char *table_name, const char **column_list, i
     table_file_header header;
     fread(&header, sizeof(table_file_header), 1, file);
 
-	tpd_entry *tpd;
-	tpd = get_tpd_from_list((char *)table_name);
-	if(!tpd){
-		printf("Error: Table %s does not exist.\n", table_name);
-		rc = TABLE_NOT_EXIST;
-		// TODO: Manage how to return table not found error
-	}
-
-    // cd_entry *columns = (cd_entry *)((char *)header.tpd_ptr + header.tpd_ptr->cd_offset);
-    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
-
-    // Print column headers
-    if (column_list != NULL) {
-        for (int i = 0; i < num_columns; i++) {
-            printf("%-30s | ", column_list[i]);
-        }
-        printf("\n");
-        for (int i = 0; i < num_columns; i++) {
-            printf("-------------------------------+ ");
-        }
-        printf("\n");
+    tpd_entry *tpd = get_tpd_from_list((char *)table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table '%s' does not exist.\n", table_name);
+        fclose(file);
+        return;
     }
 
-    // Allocate space for a record
-    char *record = (char *)malloc(header.record_size);
+    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
 
-    // Iterate through records
+    // Precompute column offsets
+    int column_offsets[MAX_NUM_COL] = {0};
+    int offset = DELETE_FLAG_SIZE;
+    for (int i = 0; i < tpd->num_columns; i++) {
+        column_offsets[i] = offset;
+        offset += columns[i].col_len;
+    }
+
+    // Find the order_by column offset
+    int order_by_offset = -1;
+    int order_by_type = -1;
+    if (strcmp(order_by_col, "") != 0) {
+        for (int i = 0; i < tpd->num_columns; i++) {
+            if (strcmp(columns[i].col_name, order_by_col) == 0) {
+                order_by_offset = column_offsets[i];
+                order_by_type = columns[i].col_type;
+                break;
+            }
+        }
+
+        if (order_by_offset == -1) {
+            fprintf(stderr, "Error: ORDER BY column '%s' not found in table '%s'.\n", order_by_col, table_name);
+            fclose(file);
+            return;
+        }
+    }
+
+    // Collect matching rows
+    char **matching_rows = (char **)malloc(header.num_records * sizeof(char *));
+    if (matching_rows) {
+        for (int i = 0; i < header.num_records; i++) {
+            matching_rows[i] = NULL;
+        }
+    }
+    int matching_count = 0;
+
+    char *record = (char *)malloc(header.record_size);
     for (int i = 0; i < header.num_records; i++) {
         fseek(file, sizeof(table_file_header) + i * header.record_size, SEEK_SET);
         fread(record, header.record_size, 1, file);
@@ -1905,31 +1949,56 @@ void fetch_and_print_records(const char *table_name, const char **column_list, i
         }
 
         if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
-            // Print each column for the matching row
-            int col_offset = DELETE_FLAG_SIZE;
-			for (int j = 0; j < num_columns; j++) {
-				if (columns[j].col_type == T_INT) {
-					// Print integer column
-					printf("%-30d | ", *((int *)(record + col_offset)));
-				} else if (columns[j].col_type == T_CHAR || columns[j].col_type == T_VARCHAR) {
-					// Print string column (ensure null termination)
-					printf("%-30.*s | ", columns[j].col_len, record + col_offset);
-				}
-				col_offset += columns[j].col_len; // Move to next column
-			}
-			printf("\n");
+            matching_rows[matching_count] = (char *)malloc(header.record_size);
+            memcpy(matching_rows[matching_count], record, header.record_size);
+            matching_count++;
         }
     }
 
-    // Free allocated resources
-    if (record) {
-		free(record);
-		record = NULL; // Prevent double free
-	}
+    // Sort rows if ORDER BY is specified
+    if (strcmp(order_by_col, "") != 0 && matching_count > 1) {
+        quick_sort_rows(matching_rows, 0, matching_count - 1, order_by_offset, order_by_type, desc);
+    }
 
+    // Print headers
+    for (int i = 0; i < num_columns; i++) {
+        printf("%-30s | ", column_list[i]);
+    }
+    printf("\n");
+    for (int i = 0; i < num_columns; i++) {
+        printf("-------------------------------+ ");
+    }
+    printf("\n");
+
+    // Print rows
+    for (int i = 0; i < matching_count; i++) {
+        offset = DELETE_FLAG_SIZE;
+        for (int j = 0; j < num_columns; j++) {
+            for (int k = 0; k < tpd->num_columns; k++) {
+                if (strcmp(columns[k].col_name, column_list[j]) == 0) {
+                    if (columns[k].col_type == T_INT) {
+                        printf("%-30d | ", *(int *)(matching_rows[i] + column_offsets[k]));
+                    } else if (columns[k].col_type == T_CHAR) {
+                        char temp[MAX_TOK_LEN + 1] = {0};
+                        strncpy(temp, matching_rows[i] + column_offsets[k], columns[k].col_len);
+                        temp[columns[k].col_len] = '\0'; // Ensure null termination
+                        printf("%-30s | ", temp);
+                    }
+                    break;
+                }
+            }
+        }
+        printf("\n");
+    }
+
+    // Free resources
+    for (int i = 0; i < matching_count; i++) {
+        free(matching_rows[i]);
+    }
+    free(matching_rows);
+    free(record);
     fclose(file);
 }
-
 
 int evaluate_conditions(const char *record, cd_entry *columns, query_condition *conditions, int num_conditions, char *logical_operators) {
     
@@ -2158,6 +2227,11 @@ void parse_where_clause(token_list *tok_list, query_condition *conditions, int *
 
     // Iterate through tokens in the WHERE clause
     while (cur != NULL) {
+        if (cur->tok_value == K_ORDER) {
+            // Stop parsing conditions if we encounter ORDER BY
+            break;
+        }
+
         if (cur->tok_class == identifier) {
             // Parse left operand (column name)
             strncpy(conditions[*num_conditions].left_operand, cur->tok_string, MAX_TOK_LEN);
@@ -2513,4 +2587,81 @@ int sem_update_row(token_list *t_list) {
     // Step 8: Report the result
     printf("UPDATE statement: %d row(s) updated.\n", updated_rows);
     return 0;
+}
+
+/*************************************************************
+	Utility Function to parse order by clause
+ *************************************************************/
+void parse_order_by_clause(token_list *tok_list, char *order_by_col, bool *desc) {
+    token_list *cur = tok_list;
+    order_by_col[0] = '\0'; // Initialize to empty
+    *desc = false;          // Default to ascending
+
+    while (cur) {
+        if (cur->tok_value == K_ORDER) {
+            cur = cur->next;
+            if (cur && cur->tok_value == K_BY) {
+                cur = cur->next;
+                if (cur && cur->tok_class == identifier) {
+                    strncpy(order_by_col, cur->tok_string, MAX_IDENT_LEN);
+                    cur = cur->next;
+                    if (cur && cur->tok_value == K_DESC) {
+                        *desc = true;
+                    }
+                }
+            }
+            break;
+        }
+        cur = cur->next;
+    }
+}
+
+
+/*************************************************************
+	Utility Function to sort rows
+ *************************************************************/
+void quick_sort_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc) {
+    if (low < high) {
+        // Partition the array and get the pivot index
+        int pivot_index = partition_rows(rows, low, high, column_offset, column_type, desc);
+
+        // Recursively sort the subarrays
+        quick_sort_rows(rows, low, pivot_index - 1, column_offset, column_type, desc);
+        quick_sort_rows(rows, pivot_index + 1, high, column_offset, column_type, desc);
+    }
+}
+
+int partition_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc) {
+    char *pivot = rows[high];
+    const char *pivot_field = pivot + column_offset;
+
+    int i = low - 1;
+
+    for (int j = low; j < high; j++) {
+        const char *field = rows[j] + column_offset;
+
+        bool should_swap = false;
+        if (column_type == T_INT) {
+            int pivot_value = *(int *)pivot_field;
+            int current_value = *(int *)field;
+            should_swap = desc ? current_value > pivot_value : current_value < pivot_value;
+        } else if (column_type == T_CHAR) {
+            int cmp = strncmp(field, pivot_field, MAX_TOK_LEN);
+            should_swap = desc ? cmp > 0 : cmp < 0;
+        }
+
+        if (should_swap) {
+            i++;
+            char *temp = rows[i];
+            rows[i] = rows[j];
+            rows[j] = temp;
+        }
+    }
+
+    // Place the pivot in the correct position
+    char *temp = rows[i + 1];
+    rows[i + 1] = rows[high];
+    rows[high] = temp;
+
+    return i + 1;
 }
