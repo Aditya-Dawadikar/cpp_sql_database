@@ -283,13 +283,17 @@ void parse_inner_join_query(token_list *tok_list,
 void handle_select_all(const char *table_name,
 						query_condition *conditions,
 						int num_conditions,
-						char *logical_operators);
+						char *logical_operators,
+						const char *order_by_col,
+						bool desc);
 void handle_select_columns(const char *table_name,
 							char **column_list,
 							int num_columns,
 							query_condition *conditions,
 							int num_conditions,
-							char *logical_operators);
+							char *logical_operators,
+							const char *order_by_col,
+							bool desc);
 void handle_select_inner_join(const char *table_name1,
 								const char *table_name2,
 								char **column_list,
@@ -350,7 +354,9 @@ void fetch_and_print_records(const char *table_name,
 								int num_columns,
 								query_condition *conditions,
 								int num_conditions,
-								char *logical_operators);
+								char *logical_operators,
+								const char *order_by_col,
+								bool desc);
 char **get_all_columns_from_table(const tpd_entry *tpd, int *num_columns);
 void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                                const char *join_col1, const char *join_col2,
@@ -362,6 +368,9 @@ void validate_columns_for_join(const char **requested_columns, int num_requested
                                const char *table_name2);
 int sem_delete_row(token_list *t_list);
 int sem_update_row(token_list *t_list);
+void parse_order_by_clause(token_list *tok_list, char *order_by_column, bool *is_desc);
+void quick_sort_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc);
+int partition_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.
