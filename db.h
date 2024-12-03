@@ -332,9 +332,6 @@ char *merge_rows(const char *row1,
                  int num_columns1,
                  cd_entry *columns2,
                  int num_columns2);
-int find_column_offset(const char *col_name,
-						cd_entry *columns,
-						int num_columns);
 void parse_on_clause(token_list *tok_list,
 						char *join_col1,
 						char *join_col2);
