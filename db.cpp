@@ -1660,8 +1660,21 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
     char *record1 = (char *)malloc(header1.record_size);
     char *record2 = (char *)malloc(header2.record_size);
 
-    int join_offset1 = find_column_offset(join_col1, columns1, tpd1->num_columns);
-    int join_offset2 = find_column_offset(join_col2, columns2, tpd2->num_columns);
+    int join_offset1 = DELETE_FLAG_SIZE;
+    for (int i = 0; i < tpd1->num_columns; i++) {
+        if (strcmp(columns1[i].col_name, join_col1) == 0) {
+            break;
+        }
+        join_offset1 += columns1[i].col_len;
+    }
+
+    int join_offset2 = DELETE_FLAG_SIZE;
+    for (int i = 0; i < tpd2->num_columns; i++) {
+        if (strcmp(columns2[i].col_name, join_col2) == 0) {
+            break;
+        }
+        join_offset2 += columns2[i].col_len;
+    }
 
     for (int i = 0; i < header1.num_records; i++) {
         fseek(file1, header1.record_offset + i * header1.record_size, SEEK_SET);
@@ -1701,7 +1714,6 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                 }
 
                 // Evaluate additional conditions
-                // if (evaluate_conditions(combined_row, combined_columns, conditions, num_conditions, logical_operators, true)) {
                 if (evaluate_conditions_join(combined_row,
                                                 columns1, tpd1->num_columns,header1.record_size,
                                                 columns2, tpd2->num_columns,header2.record_size,
@@ -1709,75 +1721,44 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                     // Print selected columns for joined rows
                     for (int k = 0; k < num_validated_columns; k++) {
                         if (strcmp(validated_columns[k].table_name, table_name1) == 0) {
-                            int col_offset = find_column_offset(validated_columns[k].column_name, columns1, tpd1->num_columns);
-                            printf("%-30s | ", record1 + col_offset);
+                            // Locate the column in the schema of table1
+                            for (int i = 0; i < tpd1->num_columns; i++) {
+                                if (strcmp(columns1[i].col_name, validated_columns[k].column_name) == 0) {
+                                    int col_offset = DELETE_FLAG_SIZE; // Start after delete flag
+                                    for (int j = 0; j < i; j++) {
+                                        col_offset += columns1[j].col_len; // Accumulate offsets
+                                    }
+
+                                    // Print the column value based on its type
+                                    if (columns1[i].col_type == T_INT) {
+                                        printf("%-30d | ", *(int *)(record1 + col_offset));
+                                    } else if (columns1[i].col_type == T_CHAR) {
+                                        printf("%-30.*s | ", columns1[i].col_len, record1 + col_offset);
+                                    }
+                                    break;
+                                }
+                            }
                         } else if (strcmp(validated_columns[k].table_name, table_name2) == 0) {
-                            int col_offset = find_column_offset(validated_columns[k].column_name, columns2, tpd2->num_columns);
-                            printf("%-30s | ", record2 + col_offset);
+                            // Locate the column in the schema of table2
+                            for (int i = 0; i < tpd2->num_columns; i++) {
+                                if (strcmp(columns2[i].col_name, validated_columns[k].column_name) == 0) {
+                                    int col_offset = DELETE_FLAG_SIZE; // Start after delete flag
+                                    for (int j = 0; j < i; j++) {
+                                        col_offset += columns2[j].col_len; // Accumulate offsets
+                                    }
+
+                                    // Print the column value based on its type
+                                    if (columns2[i].col_type == T_INT) {
+                                        printf("%-30d | ", *(int *)(record2 + col_offset));
+                                    } else if (columns2[i].col_type == T_CHAR) {
+                                        printf("%-30.*s | ", columns2[i].col_len, record2 + col_offset);
+                                    }
+                                    break;
+                                }
+                            }
                         }
                     }
                     printf("\n");
-
-                    // for (int k = 0; k < num_validated_columns; k++) {
-                    //     if (strcmp(validated_columns[k].table_name, table_name1) == 0) {
-                    //         // Find the offset within table 1 (adjust for table1's delete flag)
-                    //         int col_offset = find_column_offset(validated_columns[k].column_name, columns1, tpd1->num_columns);
-                    //         // col_offset += DELETE_FLAG_SIZE; // Add delete flag for table 1
-
-                    //         // Print based on the column type
-                    //         if (columns1[k].col_type == T_INT) {
-                    //             printf("%-30d | ", *(int *)(record1 + col_offset));
-                    //         } else if (columns1[k].col_type == T_CHAR) {
-                    //             printf("%-30.*s | ", columns1[k].col_len, record1 + col_offset);
-                    //         }
-
-                    //     } else if (strcmp(validated_columns[k].table_name, table_name2) == 0) {
-                    //         // Find the offset within table 2 (adjust for table2's delete flag)
-                    //         int col_offset = find_column_offset(validated_columns[k].column_name, columns2, tpd2->num_columns);
-                    //         // col_offset += DELETE_FLAG_SIZE; // Add delete flag for table 2
-
-                    //         // Print based on the column type
-                    //         if (columns2[k].col_type == T_INT) {
-                    //             printf("%-30d | ", *(int *)(record2 + col_offset));
-                    //         } else if (columns2[k].col_type == T_CHAR) {
-                    //             printf("%-30.*s | ", columns2[k].col_len, record2 + col_offset);
-                    //         }
-                    //     }
-                    // }
-                    // printf("\n");
-
-                    // for (int k = 0; k < num_columns; k++) {
-                    //     // Locate the corresponding validated column
-                    //     for (int v = 0; v < num_validated_columns; v++) {
-                    //         if (strcmp(original_column_list[k], validated_columns[v].column_name) == 0) {
-                    //             if (strcmp(validated_columns[v].table_name, table_name1) == 0) {
-                    //                 // Fetch column from table1
-                    //                 int col_offset = find_column_offset(validated_columns[v].column_name, columns1, tpd1->num_columns);
-                    //                 // col_offset += DELETE_FLAG_SIZE;
-
-                    //                 // Print based on type
-                    //                 if (columns1[col_offset].col_type == T_INT) {
-                    //                     printf("%-30d | ", *(int *)(record1 + col_offset));
-                    //                 } else if (columns1[col_offset].col_type == T_CHAR) {
-                    //                     printf("%-30.*s | ", columns1[col_offset].col_len, record1 + col_offset);
-                    //                 }
-                    //             } else if (strcmp(validated_columns[v].table_name, table_name2) == 0) {
-                    //                 // Fetch column from table2
-                    //                 int col_offset = find_column_offset(validated_columns[v].column_name, columns2, tpd2->num_columns);
-                    //                 // col_offset += DELETE_FLAG_SIZE;
-
-                    //                 // Print based on type
-                    //                 if (columns2[col_offset].col_type == T_INT) {
-                    //                     printf("%-30d | ", *(int *)(record2 + col_offset));
-                    //                 } else if (columns2[col_offset].col_type == T_CHAR) {
-                    //                     printf("%-30.*s | ", columns2[col_offset].col_len, record2 + col_offset);
-                    //                 }
-                    //             }
-                    //             break; // Stop searching for this column
-                    //         }
-                    //     }
-                    // }
-                    // printf("\n");
 
                 }
 
@@ -2164,19 +2145,6 @@ char *merge_rows(const char *row1,
     }
 
     return merged_row;
-}
-
-int find_column_offset(const char *col_name, cd_entry *columns, int num_columns) {
-    int offset = DELETE_FLAG_SIZE;
-
-    for (int i = 0; i < num_columns; i++) {
-        if (strcmp(columns[i].col_name, col_name) == 0) {
-            return offset; // Found column, return its offset
-        }
-        offset += columns[i].col_len; // Increment offset by column length
-    }
-
-    return -1; // Column not found
 }
 
 void parse_where_clause(token_list *tok_list, query_condition *conditions, int *num_conditions, char *logical_operators) {
