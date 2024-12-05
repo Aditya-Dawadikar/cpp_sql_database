@@ -42,6 +42,9 @@ Sample Select Queries
 ./db "select avg(emp_id) from employee"
 ./db "select count(emp_id) from employee where dept='2002'"
 
+./db "select count(emp_id) from employee natural join department on dept = dept_id"
+./db "select count(emp_id) from employee natural join department on dept = dept_id where dept_name='GCP' order by emp_id"
+
 ./db "delete from employee where emp_id=1001"
 ./db "select * from employee where emp_id=1001 or l_name='Munshi'"
 
