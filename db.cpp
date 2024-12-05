@@ -1381,13 +1381,21 @@ void parse_select_columns_query(token_list *tok_list, char *table_name, char **c
 void parse_inner_join_query(token_list *tok_list, char *table_name1, char *table_name2, char **column_list, int *num_columns, query_condition *conditions, int *num_conditions, char *logical_operators) {
     token_list *cur = tok_list;
 
-    // Parse column list
-    while (cur && cur->tok_value != K_FROM) {
-        if (cur->tok_class == identifier) {
-            column_list[(*num_columns)++] = strdup(cur->tok_string);
+    // Check for column list or *
+    bool select_all = false;
+    if (cur && cur->tok_value == S_STAR) {
+        select_all = true; // Mark as SELECT *
+        cur = cur->next;   // Move past *
+    } else {
+        // Parse explicit column list
+        while (cur && cur->tok_value != K_FROM) {
+            if (cur->tok_class == identifier) {
+                column_list[(*num_columns)++] = strdup(cur->tok_string);
+            }
+            cur = cur->next;
         }
-        cur = cur->next;
     }
+
     if (!cur || cur->tok_value != K_FROM) {
         fprintf(stderr, "Error: Missing FROM clause.\n");
         return;
@@ -1422,6 +1430,31 @@ void parse_inner_join_query(token_list *tok_list, char *table_name1, char *table
     }
     strncpy(table_name2, cur->tok_string, MAX_IDENT_LEN);
     cur = cur->next;
+
+    // If SELECT * was specified, populate column list dynamically
+    if (select_all) {
+        // Fetch metadata for both tables
+        tpd_entry *tpd1 = get_tpd_from_list((char *)table_name1);
+        tpd_entry *tpd2 = get_tpd_from_list((char *)table_name2);
+
+        if (!tpd1 || !tpd2) {
+            fprintf(stderr, "Error: One or both tables in the join query do not exist.\n");
+            return;
+        }
+
+        cd_entry *columns1 = (cd_entry *)((char *)tpd1 + tpd1->cd_offset);
+        cd_entry *columns2 = (cd_entry *)((char *)tpd2 + tpd2->cd_offset);
+
+        // Add columns from table1
+        for (int i = 0; i < tpd1->num_columns; i++) {
+            column_list[(*num_columns)++] = strdup(columns1[i].col_name);
+        }
+
+        // Add columns from table2
+        for (int i = 0; i < tpd2->num_columns; i++) {
+            column_list[(*num_columns)++] = strdup(columns2[i].col_name);
+        }
+    }
 
     // Parse ON clause
     if (!cur || cur->tok_value != K_ON) {
@@ -2164,7 +2197,7 @@ int evaluate_conditions_join(const char *record,
             for (int j = 0; j < num_columns2; j++) {
                 if (strcmp(columns2[j].col_name, col_name) == 0) {
                     target_col = &columns2[j];
-                    offset = DELETE_FLAG_SIZE + record_size1 + DELETE_FLAG_SIZE; // Include record1 size and second delete flag
+                    offset = DELETE_FLAG_SIZE + record_size1;
                     for (int k = 0; k < j; k++) {
                         offset += columns2[k].col_len;
                     }

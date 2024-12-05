@@ -32,6 +32,10 @@ Sample Select Queries
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where emp_id=1001"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where dept='2002' order by emp_id"
 ./db "select * from employee natural join department on dept = dept_id"
+./db "select * from employee natural join department on dept = dept_id where dept_name='GCP'"
+./db "select * from employee natural join department on dept = dept_id where dept_id='2002'"
+./db "select * from employee natural join department on dept = dept_id order by emp_id"
+./db "select * from employee natural join department on dept = dept_id order by emp_id where dept_name='GCP'"
 
 ./db "delete from employee where emp_id=1001"
 ./db "select * from employee where emp_id=1001 or l_name='Munshi'"
