@@ -1274,14 +1274,37 @@ int sem_select_query_handler(token_list *tok_list) {
     char logical_operators[MAX_NUM_CONDITIONS];
     memset(logical_operators, 'A', sizeof(logical_operators)); // Default to AND
 
+    // Variables for aggregate function
+    char aggregate_function[MAX_IDENT_LEN] = {0};
+    char aggregate_column[MAX_IDENT_LEN] = {0};
+
     if (is_inner_join_query(tok_list)) {
         token_list *on_clause_tokens = extract_on_clause(tok_list); // Extract ON clause tokens
-        parse_inner_join_query(tok_list, table_name1, table_name2, column_list, &num_columns, conditions, &num_conditions, logical_operators);
+
+        int aggregate_type = 0; // Declare without initialization
+        char aggregate_column[MAX_IDENT_LEN] = {0}; // Store aggregate column name
+        int aggregate_offset = -1; // Offset for the aggregate column
+
+        parse_inner_join_query(tok_list,
+                                table_name1,
+                                table_name2,
+                                column_list,
+                                &num_columns,
+                                conditions,
+                                &num_conditions,
+                                logical_operators,
+                                aggregate_column,
+                                &aggregate_type);
+
+        // Check if aggregate_type was set during parsing
+        if (aggregate_type != F_COUNT && aggregate_type != F_SUM && aggregate_type != F_AVG) {
+            aggregate_type = -1; // Set an invalid/default value if no aggregate function is found
+        }
         
         char order_by_col[MAX_IDENT_LEN] = {0};
         bool desc = false;
         parse_order_by_clause(tok_list, order_by_col, &desc);
-        
+
         handle_select_inner_join(table_name1,
                                     table_name2,
                                     column_list,
@@ -1291,7 +1314,9 @@ int sem_select_query_handler(token_list *tok_list) {
                                     logical_operators,
                                     on_clause_tokens,
                                     order_by_col,
-                                    desc);
+                                    desc,
+                                    &aggregate_type,
+                                    aggregate_column);
     } else if (is_select_all_query(tok_list)) {
         parse_select_all_query(tok_list, table_name1, conditions, &num_conditions, logical_operators);
 
@@ -1304,7 +1329,15 @@ int sem_select_query_handler(token_list *tok_list) {
         handle_select_all(table_name1, conditions, num_conditions, logical_operators, order_by_col, desc);
 
     } else {
-        parse_select_columns_query(tok_list, table_name1, column_list, &num_columns, conditions, &num_conditions, logical_operators);
+        parse_select_columns_query(tok_list,
+                                    table_name1,
+                                    column_list,
+                                    &num_columns,
+                                    conditions,
+                                    &num_conditions,
+                                    logical_operators, 
+                                    aggregate_function,
+                                    aggregate_column);
 
         // Extract ORDER BY parameters
         char order_by_col[MAX_IDENT_LEN] = {0};
@@ -1312,7 +1345,16 @@ int sem_select_query_handler(token_list *tok_list) {
         parse_order_by_clause(tok_list, order_by_col, &desc);
 
         // Call handle_select_columns with ORDER BY parameters
-        handle_select_columns(table_name1, column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+        handle_select_columns(table_name1,
+                                column_list,
+                                num_columns,
+                                conditions,
+                                num_conditions,
+                                logical_operators,
+                                aggregate_function,
+                                aggregate_column,
+                                order_by_col,
+                                desc);
 
     }
 
@@ -1347,16 +1389,50 @@ void parse_select_all_query(token_list *tok_list, char *table_name, query_condit
     }
 }
 
-void parse_select_columns_query(token_list *tok_list, char *table_name, char **column_list, int *num_columns, query_condition *conditions, int *num_conditions, char *logical_operators) {
+void parse_select_columns_query(token_list *tok_list,
+                                char *table_name,
+                                char **column_list,
+                                int *num_columns,
+                                query_condition *conditions,
+                                int *num_conditions,
+                                char *logical_operators,
+                                char *aggregate_function,
+                                char *aggregate_column) {
     token_list *cur = tok_list;
 
-    // Parse column list
-    while (cur && cur->tok_value != K_FROM) {
-        if (cur->tok_class == identifier) {
-            column_list[(*num_columns)++] = strdup(cur->tok_string);
+    // Parse columns or aggregate functions
+    if (cur->tok_value == F_COUNT || cur->tok_value == F_SUM || cur->tok_value == F_AVG) {
+        strncpy(aggregate_function, cur->tok_string, MAX_IDENT_LEN);
+        cur = cur->next;
+
+        if (cur == NULL || cur->tok_value != S_LEFT_PAREN) {
+            fprintf(stderr, "Error: Expected '(' after aggregate function.\n");
+            return;
         }
         cur = cur->next;
-    }
+
+        if (cur == NULL || cur->tok_class != identifier) {
+            fprintf(stderr, "Error: Expected column name inside aggregate function.\n");
+            return;
+        }
+        strncpy(aggregate_column, cur->tok_string, MAX_IDENT_LEN);
+        cur = cur->next;
+
+        if (cur == NULL || cur->tok_value != S_RIGHT_PAREN) {
+            fprintf(stderr, "Error: Expected ')' after column name.\n");
+            return;
+        }
+        cur = cur->next;
+    }else{
+        // Parse column list
+        while (cur && cur->tok_value != K_FROM) {
+            if (cur->tok_class == identifier) {
+                column_list[(*num_columns)++] = strdup(cur->tok_string);
+            }
+            cur = cur->next;
+        }
+    } 
+
     if (!cur || cur->tok_value != K_FROM) {
         fprintf(stderr, "Error: Missing FROM clause.\n");
         return;
@@ -1378,15 +1454,62 @@ void parse_select_columns_query(token_list *tok_list, char *table_name, char **c
     }
 }
 
-void parse_inner_join_query(token_list *tok_list, char *table_name1, char *table_name2, char **column_list, int *num_columns, query_condition *conditions, int *num_conditions, char *logical_operators) {
+void parse_inner_join_query(token_list *tok_list,
+                            char *table_name1,
+                            char *table_name2,
+                            char **column_list,
+                            int *num_columns,
+                            query_condition *conditions,
+                            int *num_conditions,
+                            char *logical_operators,
+                            char *aggregate_column,
+                            int *aggregate_type) {
     token_list *cur = tok_list;
+
+    // Initialize aggregate column and type
+    *aggregate_column = '\0';
 
     // Check for column list or *
     bool select_all = false;
     if (cur && cur->tok_value == S_STAR) {
         select_all = true; // Mark as SELECT *
         cur = cur->next;   // Move past *
-    } else {
+    } else if(cur && cur->tok_class == function_name){
+        // Check for aggregate function
+        if (strcasecmp(cur->tok_string, "SUM") == 0) {
+            *aggregate_type = F_SUM;
+        } else if (strcasecmp(cur->tok_string, "AVG") == 0) {
+            *aggregate_type = F_AVG;
+        } else if (strcasecmp(cur->tok_string, "COUNT") == 0) {
+            *aggregate_type = F_COUNT;
+        } else {
+            fprintf(stderr, "Error: Unsupported aggregate function '%s'.\n", cur->tok_string);
+            return;
+        }
+        cur = cur->next;
+
+        // Expect "("
+        if (!cur || cur->tok_value != S_LEFT_PAREN) {
+            fprintf(stderr, "Error: Expected '(' after aggregate function.\n");
+            return;
+        }
+        cur = cur->next;
+
+        // Parse aggregate column
+        if (!cur || cur->tok_class != identifier) {
+            fprintf(stderr, "Error: Expected column name inside aggregate function.\n");
+            return;
+        }
+        snprintf(aggregate_column, MAX_TOK_LEN, "%s", cur->tok_string);
+        cur = cur->next;
+
+        // Expect ")"
+        if (!cur || cur->tok_value != S_RIGHT_PAREN) {
+            fprintf(stderr, "Error: Expected ')' after aggregate column.\n");
+            return;
+        }
+        cur = cur->next;
+    }else {
         // Parse explicit column list
         while (cur && cur->tok_value != K_FROM) {
             if (cur->tok_class == identifier) {
@@ -1525,6 +1648,8 @@ void handle_select_columns(const char *table_name,
                             query_condition *conditions,
                             int num_conditions,
                             char *logical_operators,
+                            const char *aggregate_function,
+                            const char *aggregate_column,
                             const char *order_by_col,
                             bool desc) {
     // Fetch table metadata
@@ -1552,12 +1677,40 @@ void handle_select_columns(const char *table_name,
     }
 
     // Call fetch_and_print_records with the specific columns
-    fetch_and_print_records(table_name, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+    // fetch_and_print_records(table_name, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+
+    if (aggregate_function[0] != '\0') { // If aggregate function is present
+        fetch_and_compute_aggregate(table_name,
+                                    aggregate_function,
+                                    aggregate_column,
+                                    conditions,
+                                    num_conditions,
+                                    logical_operators);
+    } else {
+        fetch_and_print_records(table_name,
+                                (const char **)column_list,
+                                num_columns,
+                                conditions,
+                                num_conditions,
+                                logical_operators,
+                                order_by_col,
+                                desc);
+    }
+
 }
 
-void handle_select_inner_join(const char *table_name1, const char *table_name2, char **column_list, int num_columns,
-                              query_condition *conditions, int num_conditions, char *logical_operators,
-                              token_list *on_clause_tokens, const char *order_by_col, bool desc) {
+void handle_select_inner_join(const char *table_name1,
+                                const char *table_name2,
+                                char **column_list,
+                                int num_columns,
+                                query_condition *conditions,
+                                int num_conditions,
+                                char *logical_operators,
+                                token_list *on_clause_tokens,
+                                const char *order_by_col,
+                                bool desc,
+                                int *aggregate_type,
+                                char *aggregate_column) {
     // Declare variables for join columns
     char join_col1[MAX_TOK_LEN];
     char join_col2[MAX_TOK_LEN];
@@ -1573,6 +1726,7 @@ void handle_select_inner_join(const char *table_name1, const char *table_name2, 
     // Fetch and print the inner join results
     fetch_and_read_inner_join(table_name1, table_name2, join_col1, join_col2, validated_columns,
                               validated_columns_count, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators,
+                              aggregate_column, *aggregate_type,
                               order_by_col, desc);
 }
 
@@ -1706,12 +1860,21 @@ void parse_on_clause(token_list *tok_list, char *join_col1, char *join_col2) {
     strncpy(join_col2, cur->tok_string, MAX_TOK_LEN);
 }
 
-void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
-                               const char *join_col1, const char *join_col2,
-                               column_mapping *validated_columns, int num_validated_columns,
-                               const char **original_column_list, int num_columns,
-                               query_condition *conditions, int num_conditions, char *logical_operators,
-                               const char *order_by_col, bool desc) {
+void fetch_and_read_inner_join(const char *table_name1,
+                                const char *table_name2,
+                                const char *join_col1,
+                                const char *join_col2,
+                                column_mapping *validated_columns,
+                                int num_validated_columns,
+                                const char **original_column_list,
+                                int num_columns,
+                                query_condition *conditions,
+                                int num_conditions,
+                                char *logical_operators,
+                                const char *aggregate_column,
+                                int aggregate_type,
+                                const char *order_by_col,
+                                bool desc) {
     // Fetch metadata for both tables
     tpd_entry *tpd1 = get_tpd_from_list((char *)table_name1);
     tpd_entry *tpd2 = get_tpd_from_list((char *)table_name2);
@@ -1757,138 +1920,232 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
         return;
     }
 
-    // Array for storing joined rows
-    char **result_rows = (char **)malloc(header1.num_records * header2.num_records * sizeof(char *));
-    int result_count = 0;
+    if (aggregate_type > 0) {
+        // Aggregate query
+        int aggregate_offset = calculate_column_offset_from_mapping(aggregate_column,
+                                                                        validated_columns,
+                                                                        num_validated_columns,
+                                                                        columns1,
+                                                                        tpd1->num_columns,
+                                                                        columns2,
+                                                                        tpd2->num_columns);
+        double sum = 0;
+        int count = 0;
 
-    // Perform join operation
-    char *record1 = (char *)malloc(header1.record_size);
-    char *record2 = (char *)malloc(header2.record_size);
+        char *record1 = (char *)malloc(header1.record_size);
+        char *record2 = (char *)malloc(header2.record_size);
 
-    for (int i = 0; i < header1.num_records; i++) {
-        fseek(file1, header1.record_offset + i * header1.record_size, SEEK_SET);
-        fread(record1, header1.record_size, 1, file1);
+        for (int i = 0; i < header1.num_records; i++) {
+            fseek(file1, header1.record_offset + i * header1.record_size, SEEK_SET);
+            fread(record1, header1.record_size, 1, file1);
 
-        if (record1[0] == 1) { // Skip deleted rows
-            continue;
-        }
-
-        for (int j = 0; j < header2.num_records; j++) {
-            fseek(file2, header2.record_offset + j * header2.record_size, SEEK_SET);
-            fread(record2, header2.record_size, 1, file2);
-
-            if (record2[0] == 1) { // Skip deleted rows
+            if (record1[0] == 1) { // Skip deleted rows
                 continue;
             }
 
-            // Check join condition
-            if (strncmp(record1 + join_offset1, record2 + join_offset2, MAX_TOK_LEN) == 0) {
-                // Concatenate rows for condition evaluation
-                char *combined_row = (char *)malloc(header1.record_size + header2.record_size);
-                memcpy(combined_row, record1, header1.record_size);
-                memcpy(combined_row + header1.record_size, record2, header2.record_size);
+            for (int j = 0; j < header2.num_records; j++) {
+                fseek(file2, header2.record_offset + j * header2.record_size, SEEK_SET);
+                fread(record2, header2.record_size, 1, file2);
 
-                // Evaluate conditions
-                if (evaluate_conditions_join(combined_row,
-                                             columns1, tpd1->num_columns, header1.record_size,
-                                             columns2, tpd2->num_columns, header2.record_size,
-                                             conditions, num_conditions, logical_operators)) {
-                    result_rows[result_count++] = combined_row;
-                } else {
+                if (record2[0] == 1) { // Skip deleted rows
+                    continue;
+                }
+
+                // Check join condition
+                if (strncmp(record1 + join_offset1, record2 + join_offset2, MAX_TOK_LEN) == 0) {
+                    // Create combined row
+                    char *combined_row = (char *)malloc(header1.record_size + header2.record_size);
+                    memcpy(combined_row, record1, header1.record_size);
+                    memcpy(combined_row + header1.record_size, record2, header2.record_size);
+
+                    // Evaluate conditions
+                    if (evaluate_conditions_join(combined_row,
+                              columns1, tpd1->num_columns, header1.record_size,
+                              columns2, tpd2->num_columns, header2.record_size,
+                              conditions, num_conditions, logical_operators)) {
+                        if (aggregate_type == F_COUNT) {
+                            count++;
+                        } else if (aggregate_type == F_SUM || aggregate_type == F_AVG) {
+                            // Determine the table and column for aggregation
+                            int col_offset = validated_columns[aggregate_offset].col_offset;
+                            const char *table_name = validated_columns[aggregate_offset].table_name;
+                            cd_entry *columns = NULL;
+                            int col_type = 0;
+
+                            if (strcmp(table_name, table_name1) == 0) {
+                                columns = columns1;
+                                for (int i = 0; i < tpd1->num_columns; i++) {
+                                    if (strcmp(columns[i].col_name, validated_columns[aggregate_offset].column_name) == 0) {
+                                        col_type = columns[i].col_type;
+                                        break;
+                                    }
+                                }
+                            } else if (strcmp(table_name, table_name2) == 0) {
+                                columns = columns2;
+                                for (int i = 0; i < tpd2->num_columns; i++) {
+                                    if (strcmp(columns[i].col_name, validated_columns[aggregate_offset].column_name) == 0) {
+                                        col_type = columns[i].col_type;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // Perform aggregation based on column type
+                            double value = (col_type == T_INT)
+                                            ? *(int *)(combined_row + col_offset)
+                                            : atof(combined_row + col_offset);
+                            sum += value;
+                            count++;
+                        }
+                    }
+
                     free(combined_row);
                 }
             }
         }
-    }
 
-    // Sort rows if ORDER BY is specified
-    if (strcmp(order_by_col,"")!=0 && result_count > 1) {
-        int order_by_offset = calculate_column_offset_from_mapping(order_by_col,
-                                                                    validated_columns,
-                                                                    num_validated_columns,
-                                                                    columns1,
-                                                                    tpd1->num_columns,
-                                                                    columns2,
-                                                                    tpd2->num_columns);
-        int order_by_type = determine_column_type(order_by_col,
-                                                    validated_columns,
-                                                    num_validated_columns,
-                                                    columns1,
-                                                    tpd1->num_columns,
-                                                    columns2,
-                                                    tpd2->num_columns,
-                                                    table_name1,
-                                                    table_name2);
-        quick_sort_rows(result_rows, 0, result_count - 1, order_by_offset, order_by_type, desc);
-    }
+        free(record1);
+        free(record2);
 
-    // Print results
-    for (int i = 0; i < num_validated_columns; i++) {
-        printf("%-30s | ", validated_columns[i].column_name);
-    }
-    printf("\n");
-    for (int i = 0; i < num_validated_columns; i++) {
-        printf("-------------------------------+ ");
-    }
-    printf("\n");
+        // Print aggregate result
+        const char *aggregate_name = get_aggregate_function_name(aggregate_type);
+        print_aggregate_result(aggregate_name, sum, count);
 
-    for (int i = 0; i < result_count; i++) {
-        char *row = result_rows[i]; // Current row pointer
+    }else{
+        // Array for storing joined rows
+        char **result_rows = (char **)malloc(header1.num_records * header2.num_records * sizeof(char *));
+        int result_count = 0;
 
-        // Iterate over the validated columns to print the values
-        for (int j = 0; j < num_validated_columns; j++) {
-            const char *table_name = validated_columns[j].table_name;
-            const char *column_name = validated_columns[j].column_name;
+        // Perform join operation
+        char *record1 = (char *)malloc(header1.record_size);
+        char *record2 = (char *)malloc(header2.record_size);
 
-            // Determine which table the column belongs to and compute the offset
-            int offset = DELETE_FLAG_SIZE;
-            cd_entry *columns = NULL;
-            int num_columns = 0;
+        for (int i = 0; i < header1.num_records; i++) {
+            fseek(file1, header1.record_offset + i * header1.record_size, SEEK_SET);
+            fread(record1, header1.record_size, 1, file1);
 
-            if (strcmp(table_name, table_name1) == 0) {
-                columns = columns1; // Pass the correct pointer to columns1
-                num_columns = tpd1->num_columns;
-            } else if (strcmp(table_name, table_name2) == 0) {
-                columns = columns2; // Pass the correct pointer to columns2
-                num_columns = tpd2->num_columns;
-                offset += header1.record_size;
+            if (record1[0] == 1) { // Skip deleted rows
+                continue;
             }
 
-            int matching_col_index = -1; // To store the index of the matching column
-            for (int k = 0; k < num_columns; k++) {
-                // printf("\nComparing column '%s' with '%s'\n", columns[k].col_name, column_name); // Debug
-                if (strcmp(columns[k].col_name, column_name) == 0) {
-                    matching_col_index = k; // Store the index of the matching column
-                    // printf("Matched column '%s' at index %d\n", column_name, k); // Debug
-                    break;
-                }
-                // printf("Offset before adding: %d\n", offset); // Debug
-                offset += columns[k].col_len; // Accumulate offset for each column
-                // printf("Offset after adding: %d\n", offset); // Debug
-            }
+            for (int j = 0; j < header2.num_records; j++) {
+                fseek(file2, header2.record_offset + j * header2.record_size, SEEK_SET);
+                fread(record2, header2.record_size, 1, file2);
 
-            // Check if a matching column was found
-            if (matching_col_index != -1) {
-                // printf("Final offset for column '%s': %d\n", column_name, offset); // Debug
-                if (columns[matching_col_index].col_type == T_INT) {
-                    printf("%-30d | ", *(int *)(row + offset));
-                } else if (columns[matching_col_index].col_type == T_CHAR) {
-                    printf("%-30.*s | ", columns[matching_col_index].col_len, row + offset);
+                if (record2[0] == 1) { // Skip deleted rows
+                    continue;
                 }
-            } else {
-                printf("Error: Column '%s' not found.\n", column_name);
+
+                // Check join condition
+                if (strncmp(record1 + join_offset1, record2 + join_offset2, MAX_TOK_LEN) == 0) {
+                    // Concatenate rows for condition evaluation
+                    char *combined_row = (char *)malloc(header1.record_size + header2.record_size);
+                    memcpy(combined_row, record1, header1.record_size);
+                    memcpy(combined_row + header1.record_size, record2, header2.record_size);
+
+                    // Evaluate conditions
+                    if (evaluate_conditions_join(combined_row,
+                                                columns1, tpd1->num_columns, header1.record_size,
+                                                columns2, tpd2->num_columns, header2.record_size,
+                                                conditions, num_conditions, logical_operators)) {
+                        result_rows[result_count++] = combined_row;
+                    } else {
+                        free(combined_row);
+                    }
+                }
             }
         }
-        printf("\n"); // Print a new line after each row
 
-        // Free the memory allocated for this row
-        free(row);
+        // Sort rows if ORDER BY is specified
+        if (strcmp(order_by_col,"")!=0 && result_count > 1) {
+            int order_by_offset = calculate_column_offset_from_mapping(order_by_col,
+                                                                        validated_columns,
+                                                                        num_validated_columns,
+                                                                        columns1,
+                                                                        tpd1->num_columns,
+                                                                        columns2,
+                                                                        tpd2->num_columns);
+            int order_by_type = determine_column_type(order_by_col,
+                                                        validated_columns,
+                                                        num_validated_columns,
+                                                        columns1,
+                                                        tpd1->num_columns,
+                                                        columns2,
+                                                        tpd2->num_columns,
+                                                        table_name1,
+                                                        table_name2);
+            quick_sort_rows(result_rows, 0, result_count - 1, order_by_offset, order_by_type, desc);
+        }
+
+        // Print results
+        for (int i = 0; i < num_validated_columns; i++) {
+            printf("%-30s | ", validated_columns[i].column_name);
+        }
+        printf("\n");
+        for (int i = 0; i < num_validated_columns; i++) {
+            printf("-------------------------------+ ");
+        }
+        printf("\n");
+
+        for (int i = 0; i < result_count; i++) {
+            char *row = result_rows[i]; // Current row pointer
+
+            // Iterate over the validated columns to print the values
+            for (int j = 0; j < num_validated_columns; j++) {
+                const char *table_name = validated_columns[j].table_name;
+                const char *column_name = validated_columns[j].column_name;
+
+                // Determine which table the column belongs to and compute the offset
+                int offset = DELETE_FLAG_SIZE;
+                cd_entry *columns = NULL;
+                int num_columns = 0;
+
+                if (strcmp(table_name, table_name1) == 0) {
+                    columns = columns1; // Pass the correct pointer to columns1
+                    num_columns = tpd1->num_columns;
+                } else if (strcmp(table_name, table_name2) == 0) {
+                    columns = columns2; // Pass the correct pointer to columns2
+                    num_columns = tpd2->num_columns;
+                    offset += header1.record_size;
+                }
+
+                int matching_col_index = -1; // To store the index of the matching column
+                for (int k = 0; k < num_columns; k++) {
+                    // printf("\nComparing column '%s' with '%s'\n", columns[k].col_name, column_name); // Debug
+                    if (strcmp(columns[k].col_name, column_name) == 0) {
+                        matching_col_index = k; // Store the index of the matching column
+                        // printf("Matched column '%s' at index %d\n", column_name, k); // Debug
+                        break;
+                    }
+                    // printf("Offset before adding: %d\n", offset); // Debug
+                    offset += columns[k].col_len; // Accumulate offset for each column
+                    // printf("Offset after adding: %d\n", offset); // Debug
+                }
+
+                // Check if a matching column was found
+                if (matching_col_index != -1) {
+                    // printf("Final offset for column '%s': %d\n", column_name, offset); // Debug
+                    if (columns[matching_col_index].col_type == T_INT) {
+                        printf("%-30d | ", *(int *)(row + offset));
+                    } else if (columns[matching_col_index].col_type == T_CHAR) {
+                        printf("%-30.*s | ", columns[matching_col_index].col_len, row + offset);
+                    }
+                } else {
+                    printf("Error: Column '%s' not found.\n", column_name);
+                }
+            }
+            printf("\n"); // Print a new line after each row
+
+            // Free the memory allocated for this row
+            free(row);
+        }
+
+        free(result_rows);
+
+        free(record1);
+        free(record2);
     }
 
-    free(result_rows);
-
-    free(record1);
-    free(record2);
     fclose(file1);
     fclose(file2);
 }
@@ -2754,4 +3011,116 @@ int partition_rows(char **rows, int low, int high, int column_offset, int column
     rows[high] = temp;
 
     return i + 1;
+}
+
+void fetch_and_compute_aggregate(const char *table_name, const char *aggregate_function, const char *aggregate_column,
+                                  query_condition *conditions, int num_conditions, char *logical_operators) {
+    char filename[MAX_IDENT_LEN + 5];
+    sprintf(filename, "%s.tab", table_name);
+
+    FILE *file = fopen(filename, "rb");
+    if (!file) {
+        fprintf(stderr, "Error: Could not open file %s.\n", filename);
+        return;
+    }
+
+    table_file_header header;
+    fread(&header, sizeof(table_file_header), 1, file);
+
+    tpd_entry *tpd = get_tpd_from_list((char *)table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table '%s' not found.\n", table_name);
+        fclose(file);
+        return;
+    }
+
+    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
+
+    // Locate the aggregate column
+    int aggregate_offset = DELETE_FLAG_SIZE;
+    int aggregate_type = -1;
+    for (int i = 0; i < tpd->num_columns; i++) {
+        if (strcmp(columns[i].col_name, aggregate_column) == 0) {
+            aggregate_type = columns[i].col_type;
+            break;
+        }
+        aggregate_offset += columns[i].col_len;
+    }
+
+    if (aggregate_type == -1) {
+        fprintf(stderr, "Error: Column '%s' not found in table '%s'.\n", aggregate_column, table_name);
+        fclose(file);
+        return;
+    }
+
+    // Compute aggregate
+    int count = 0;
+    double sum = 0.0;
+
+    char *record = (char *)malloc(header.record_size);
+    for (int i = 0; i < header.num_records; i++) {
+        fseek(file, header.record_offset + i * header.record_size, SEEK_SET);
+        fread(record, header.record_size, 1, file);
+
+        if (record[0] == 1) { // Skip deleted rows
+            continue;
+        }
+
+        if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
+            count++;
+            if (aggregate_type == T_INT) {
+                sum += *(int *)(record + aggregate_offset);
+            } else if (aggregate_type == T_CHAR) {
+                fprintf(stderr, "Error: Aggregate operations not supported on CHAR columns.\n");
+                free(record);
+                fclose(file);
+                return;
+            }
+        }
+    }
+
+    // Print results
+    printf("\n%-30s | %-30s\n", "AGGREGATE FUNCTION", "RESULT");
+    printf("-------------------------------+-------------------------------\n");
+    if (strcasecmp(aggregate_function, "COUNT") == 0) {
+        printf("%-30s | %-30d\n", "COUNT", count);
+    } else if (strcasecmp(aggregate_function, "SUM") == 0) {
+        printf("%-30s | %-30.2f\n", "SUM", sum);
+    } else if (strcasecmp(aggregate_function, "AVG") == 0) {
+        printf("%-30s | %-30.2f\n", "AVG", (count > 0) ? sum / count : 0.0);
+    }
+
+    free(record);
+    fclose(file);
+}
+
+void print_aggregate_result(const char *aggregate_function, double sum, int count) {
+    // Print the header
+    printf("%-30s | %-30s\n", "AGGREGATE FUNCTION", "RESULT");
+    printf("-------------------------------+-------------------------------\n");
+
+    // Determine the result to print based on the aggregate function
+    if (strcasecmp(aggregate_function, "COUNT") == 0) {
+        printf("%-30s | %-30d\n", "COUNT", count);
+    } else if (strcasecmp(aggregate_function, "SUM") == 0) {
+        printf("%-30s | %-30.2f\n", "SUM", sum);
+    } else if (strcasecmp(aggregate_function, "AVG") == 0) {
+        double avg = (count > 0) ? sum / count : 0.0;
+        printf("%-30s | %-30.2f\n", "AVG", avg);
+    } else {
+        fprintf(stderr, "Error: Unsupported aggregate function '%s'.\n", aggregate_function);
+    }
+}
+
+const char* get_aggregate_function_name(int aggregate_type) {
+    switch (aggregate_type) {
+        case F_COUNT:
+            return "COUNT";
+        case F_SUM:
+            return "SUM";
+        case F_AVG:
+            return "AVG";
+        default:
+            return "UNKNOWN";
+    }
 }

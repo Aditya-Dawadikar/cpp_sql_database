@@ -271,7 +271,9 @@ void parse_select_columns_query(token_list *tok_list,
 								int *num_columns,
 								query_condition *conditions,
 								int *num_conditions,
-								char *logical_operators);
+								char *logical_operators,
+                                char *aggregate_function,
+                                char *aggregate_column);
 void parse_inner_join_query(token_list *tok_list,
 							char *table_name1,
 							char *table_name2,
@@ -279,7 +281,9 @@ void parse_inner_join_query(token_list *tok_list,
 							int *num_columns,
 							query_condition *conditions,
 							int *num_conditions,
-							char *logical_operators);
+							char *logical_operators,
+                            char *aggregate_column,
+                            int *aggregate_type);
 void handle_select_all(const char *table_name,
 						query_condition *conditions,
 						int num_conditions,
@@ -292,6 +296,8 @@ void handle_select_columns(const char *table_name,
 							query_condition *conditions,
 							int num_conditions,
 							char *logical_operators,
+							const char *aggregate_function,
+							const char *aggregate_column,
 							const char *order_by_col,
 							bool desc);
 void handle_select_inner_join(const char *table_name1,
@@ -303,7 +309,9 @@ void handle_select_inner_join(const char *table_name1,
 								char *logical_operators,
                               	token_list *on_clause_tokens,
 								const char *order_by_col,
-								bool desc);
+								bool desc,
+                                int *aggregate_type,
+                                char *aggregate_column);
 table_data *perform_inner_join(const char *table1,
 								const char *table2,
 								const char *join_col1,
@@ -358,6 +366,8 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                                column_mapping *validated_columns, int num_validated_columns,
                                const char **original_column_list, int num_columns,
                                query_condition *conditions, int num_conditions, char *logical_operators,
+							   const char *aggregate_column,
+                               int aggregate_type,
                                const char *order_by_col, bool desc);
 void validate_columns_for_join(const char **column_list, int column_list_count, column_mapping *validated_columns,
                                int *validated_columns_count, const char *table_name1, const char *table_name2,
@@ -376,6 +386,14 @@ int determine_column_type(const char *col_name, column_mapping *validated_column
                           const char *table_name1, const char *table_name2);
 bool column_in_list(const char *column_name, column_mapping *validated_columns, int num_validated_columns);
 bool column_exists_in_table(const char *column_name, const char *table_name);
+void fetch_and_compute_aggregate(const char *table_name,
+									const char *aggregate_function,
+									const char *aggregate_column,
+                                	query_condition *conditions,
+									int num_conditions,
+									char *logical_operators);
+void print_aggregate_result(const char *aggregate_function, double sum, int count);
+const char* get_aggregate_function_name(int aggregate_type);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.
