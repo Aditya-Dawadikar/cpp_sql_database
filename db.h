@@ -298,10 +298,12 @@ void handle_select_inner_join(const char *table_name1,
 								const char *table_name2,
 								char **column_list,
 								int num_columns,
-								query_condition *conditions,
+                              	query_condition *conditions,
 								int num_conditions,
 								char *logical_operators,
-								token_list *on_clause_tokens);
+                              	token_list *on_clause_tokens,
+								const char *order_by_col,
+								bool desc);
 table_data *perform_inner_join(const char *table1,
 								const char *table2,
 								const char *join_col1,
@@ -312,13 +314,6 @@ table_data *perform_inner_join(const char *table1,
 								int num_conditions,
 								char *logical_operators
 							);
-
-table_data *fetch_records(const char *table_name,
-							const char **column_list,
-							int num_columns,
-							query_condition *conditions,
-							int num_conditions,
-							char *logical_operators);
 int evaluate_conditions(const char *record,
 						cd_entry *columns,
 						query_condition *conditions,
@@ -362,15 +357,31 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                                const char *join_col1, const char *join_col2,
                                column_mapping *validated_columns, int num_validated_columns,
                                const char **original_column_list, int num_columns,
-                               query_condition *conditions, int num_conditions, char *logical_operators);
-void validate_columns_for_join(const char **requested_columns, int num_requested_columns,
-                               column_mapping *validated_columns, const char *table_name1,
-                               const char *table_name2);
+                               query_condition *conditions, int num_conditions, char *logical_operators,
+                               const char *order_by_col, bool desc);
+void validate_columns_for_join(const char **column_list, int column_list_count, column_mapping *validated_columns,
+                               int *validated_columns_count, const char *table_name1, const char *table_name2,
+                               query_condition *conditions, int num_conditions, const char *order_by_col);
 int sem_delete_row(token_list *t_list);
 int sem_update_row(token_list *t_list);
 void parse_order_by_clause(token_list *tok_list, char *order_by_column, bool *is_desc);
 void quick_sort_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc);
 int partition_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc);
+int calculate_column_offset(const char *col_name, cd_entry *columns, int num_columns);
+int calculate_column_offset_from_mapping(const char *col_name,
+											column_mapping *columns,
+											int num_columns,
+											cd_entry *schema,
+											int schema_columns);
+int determine_column_type(const char *col_name,
+							column_mapping *validated_columns,
+							int num_validated_columns, 
+                        	cd_entry *columns1,
+							int num_columns1,
+							cd_entry *columns2,
+							int num_columns2);
+bool column_in_list(const char *column_name, column_mapping *validated_columns, int num_validated_columns);
+bool column_exists_in_table(const char *column_name, const char *table_name);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.

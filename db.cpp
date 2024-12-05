@@ -1277,7 +1277,21 @@ int sem_select_query_handler(token_list *tok_list) {
     if (is_inner_join_query(tok_list)) {
         token_list *on_clause_tokens = extract_on_clause(tok_list); // Extract ON clause tokens
         parse_inner_join_query(tok_list, table_name1, table_name2, column_list, &num_columns, conditions, &num_conditions, logical_operators);
-        handle_select_inner_join(table_name1, table_name2, column_list, num_columns, conditions, num_conditions, logical_operators, on_clause_tokens);
+        
+        char order_by_col[MAX_IDENT_LEN] = {0};
+        bool desc = false;
+        parse_order_by_clause(tok_list, order_by_col, &desc);
+        
+        handle_select_inner_join(table_name1,
+                                    table_name2,
+                                    column_list,
+                                    num_columns,
+                                    conditions,
+                                    num_conditions,
+                                    logical_operators,
+                                    on_clause_tokens,
+                                    order_by_col,
+                                    desc);
     } else if (is_select_all_query(tok_list)) {
         parse_select_all_query(tok_list, table_name1, conditions, &num_conditions, logical_operators);
 
@@ -1510,7 +1524,7 @@ void handle_select_columns(const char *table_name,
 
 void handle_select_inner_join(const char *table_name1, const char *table_name2, char **column_list, int num_columns,
                               query_condition *conditions, int num_conditions, char *logical_operators,
-                              token_list *on_clause_tokens) {
+                              token_list *on_clause_tokens, const char *order_by_col, bool desc) {
     // Declare variables for join columns
     char join_col1[MAX_TOK_LEN];
     char join_col2[MAX_TOK_LEN];
@@ -1519,57 +1533,106 @@ void handle_select_inner_join(const char *table_name1, const char *table_name2, 
     parse_on_clause(on_clause_tokens, join_col1, join_col2);
 
 	column_mapping validated_columns[MAX_NUM_COL];
-	validate_columns_for_join((const char **)column_list, num_columns, validated_columns, table_name1, table_name2);
+    int validated_columns_count = 0;
+	validate_columns_for_join((const char **)column_list, num_columns, validated_columns,&validated_columns_count, table_name1, table_name2, conditions, num_conditions, order_by_col);
 
 
     // Fetch and print the inner join results
     fetch_and_read_inner_join(table_name1, table_name2, join_col1, join_col2, validated_columns,
-                              num_columns, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators);
-}
-
-void validate_columns_for_join(const char **requested_columns, int num_requested_columns,
-                               column_mapping *validated_columns, const char *table_name1,
-                               const char *table_name2) {
-    tpd_entry *tpd1 = get_tpd_from_list((char *)table_name1);
-    tpd_entry *tpd2 = get_tpd_from_list((char *)table_name2);
-    cd_entry *columns1 = (cd_entry *)((char *)tpd1 + tpd1->cd_offset);
-    cd_entry *columns2 = (cd_entry *)((char *)tpd2 + tpd2->cd_offset);
-
-    int col_index = 0;
-    int offset = DELETE_FLAG_SIZE;
-
-    // Validate columns for table 1
-    for (int i = 0; i < num_requested_columns; i++) {
-        for (int j = 0; j < tpd1->num_columns; j++) {
-            if (strcmp(requested_columns[i], columns1[j].col_name) == 0) {
-                validated_columns[col_index].table_name = table_name1;
-                validated_columns[col_index].column_name = columns1[j].col_name;
-                validated_columns[col_index].col_offset = offset;
-                col_index++;
-                break;
-            }
-            offset += columns1[j].col_len;
-        }
-    }
-
-    offset = DELETE_FLAG_SIZE; // Reset for table 2
-
-    // Validate columns for table 2
-    for (int i = 0; i < num_requested_columns; i++) {
-        for (int j = 0; j < tpd2->num_columns; j++) {
-            if (strcmp(requested_columns[i], columns2[j].col_name) == 0) {
-                validated_columns[col_index].table_name = table_name2;
-                validated_columns[col_index].column_name = columns2[j].col_name;
-                validated_columns[col_index].col_offset = offset;
-                col_index++;
-                break;
-            }
-            offset += columns2[j].col_len;
-        }
-    }
+                              validated_columns_count, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators,
+                              order_by_col, desc);
 }
 
 
+void validate_columns_for_join(const char **column_list, int column_list_count, column_mapping *validated_columns,
+                               int *validated_columns_count, const char *table_name1, const char *table_name2,
+                               query_condition *conditions, int num_conditions, const char *order_by_col) {
+    // Track the number of validated columns
+    int count = 0;
+
+    // Validate explicitly requested columns
+    for (int i = 0; i < column_list_count; i++) {
+        const char *col_name = column_list[i];
+        if (column_exists_in_table(col_name, table_name1)) {
+            validated_columns[count].column_name = col_name; // Assign pointer directly
+            validated_columns[count].table_name = table_name1;
+            count++;
+        } else if (column_exists_in_table(col_name, table_name2)) {
+            validated_columns[count].column_name = col_name; // Assign pointer directly
+            validated_columns[count].table_name = table_name2;
+            count++;
+        } else {
+            fprintf(stderr, "Error: Column '%s' not found in either table '%s' or '%s'.\n", col_name, table_name1, table_name2);
+            return;
+        }
+    }
+
+    // Validate columns from WHERE clause
+    for (int i = 0; i < num_conditions; i++) {
+        const char *col_name = conditions[i].left_operand;
+        if (!column_in_list(col_name, validated_columns, count)) {
+            if (column_exists_in_table(col_name, table_name1)) {
+                validated_columns[count].column_name = col_name; // Assign pointer directly
+                validated_columns[count].table_name = table_name1;
+                count++;
+            } else if (column_exists_in_table(col_name, table_name2)) {
+                validated_columns[count].column_name = col_name; // Assign pointer directly
+                validated_columns[count].table_name = table_name2;
+                count++;
+            } else {
+                fprintf(stderr, "Error: Column '%s' used in WHERE clause not found in either table '%s' or '%s'.\n", col_name, table_name1, table_name2);
+                return;
+            }
+        }
+    }
+
+    // Validate the ORDER BY column
+    if (strcmp(order_by_col, "")!=0 && strlen(order_by_col) > 0) {
+        if (!column_in_list(order_by_col, validated_columns, count)) {
+            if (column_exists_in_table(order_by_col, table_name1)) {
+                validated_columns[count].column_name = order_by_col; // Assign pointer directly
+                validated_columns[count].table_name = table_name1;
+                count++;
+            } else if (column_exists_in_table(order_by_col, table_name2)) {
+                validated_columns[count].column_name = order_by_col; // Assign pointer directly
+                validated_columns[count].table_name = table_name2;
+                count++;
+            } else {
+                fprintf(stderr, "Error: ORDER BY column '%s' not found in either table '%s' or '%s'.\n", order_by_col, table_name1, table_name2);
+                return;
+            }
+        }
+    }
+
+    // Update the validated_columns_count
+    *validated_columns_count = count;
+}
+
+
+bool column_exists_in_table(const char *column_name, const char *table_name) {
+    tpd_entry *tpd = get_tpd_from_list((char *)table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table '%s' not found.\n", table_name);
+        return false;
+    }
+
+    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
+    for (int i = 0; i < tpd->num_columns; i++) {
+        if (strcmp(columns[i].col_name, column_name) == 0) {
+            return true; // Column found in the table
+        }
+    }
+    return false; // Column not found in the table
+}
+
+bool column_in_list(const char *column_name, column_mapping *validated_columns, int num_validated_columns) {
+    for (int i = 0; i < num_validated_columns; i++) {
+        if (strcmp(validated_columns[i].column_name, column_name) == 0) {
+            return true; // Column already exists in the validated list
+        }
+    }
+    return false; // Column not found in the validated list
+}
 
 char **get_all_columns_from_table(const tpd_entry *tpd, int *num_columns) {
     cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
@@ -1614,7 +1677,8 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                                const char *join_col1, const char *join_col2,
                                column_mapping *validated_columns, int num_validated_columns,
                                const char **original_column_list, int num_columns,
-                               query_condition *conditions, int num_conditions, char *logical_operators) {
+                               query_condition *conditions, int num_conditions, char *logical_operators,
+                               const char *order_by_col, bool desc) {
     // Fetch metadata for both tables
     tpd_entry *tpd1 = get_tpd_from_list((char *)table_name1);
     tpd_entry *tpd2 = get_tpd_from_list((char *)table_name2);
@@ -1624,7 +1688,7 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
         return;
     }
 
-    // Open table files to determine their sizes
+    // Open table files
     char filename1[MAX_IDENT_LEN + 5];
     char filename2[MAX_IDENT_LEN + 5];
     sprintf(filename1, "%s.tab", table_name1);
@@ -1640,68 +1704,33 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
         return;
     }
 
-    // Read table headers to compare sizes
+    // Read table headers
     table_file_header header1, header2;
     fread(&header1, sizeof(table_file_header), 1, file1);
     fread(&header2, sizeof(table_file_header), 1, file2);
 
-    // Ensure larger table is on the left-hand side
-    if (header2.num_records > header1.num_records) {
-        // Swap tables and join columns
-        const char *temp_table = table_name1;
-        table_name1 = table_name2;
-        table_name2 = temp_table;
-
-        const char *temp_col = join_col1;
-        join_col1 = join_col2;
-        join_col2 = temp_col;
-
-        // Swap file handles and headers
-        FILE *temp_file = file1;
-        file1 = file2;
-        file2 = temp_file;
-
-        table_file_header temp_header = header1;
-        header1 = header2;
-        header2 = temp_header;
-
-        tpd_entry *temp_tpd = tpd1;
-        tpd1 = tpd2;
-        tpd2 = temp_tpd;
-    }
-
+    // Get column definitions
     cd_entry *columns1 = (cd_entry *)((char *)tpd1 + tpd1->cd_offset);
     cd_entry *columns2 = (cd_entry *)((char *)tpd2 + tpd2->cd_offset);
 
-    // Print column headers
-    for (int i = 0; i < num_validated_columns; i++) {
-        printf("%-30s | ", validated_columns[i].column_name);
-    }
-    printf("\n");
-    for (int i = 0; i < num_validated_columns; i++) {
-        printf("-------------------------------+ ");
-    }
-    printf("\n");
+    // Find offsets for join columns
+    int join_offset1 = calculate_column_offset(join_col1, columns1, tpd1->num_columns);
+    int join_offset2 = calculate_column_offset(join_col2, columns2, tpd2->num_columns);
 
-    // Read rows from both tables and perform join
+    if (join_offset1 == -1 || join_offset2 == -1) {
+        fprintf(stderr, "Error: Join column not found in one or both tables.\n");
+        fclose(file1);
+        fclose(file2);
+        return;
+    }
+
+    // Array for storing joined rows
+    char **result_rows = (char **)malloc(header1.num_records * header2.num_records * sizeof(char *));
+    int result_count = 0;
+
+    // Perform join operation
     char *record1 = (char *)malloc(header1.record_size);
     char *record2 = (char *)malloc(header2.record_size);
-
-    int join_offset1 = DELETE_FLAG_SIZE;
-    for (int i = 0; i < tpd1->num_columns; i++) {
-        if (strcmp(columns1[i].col_name, join_col1) == 0) {
-            break;
-        }
-        join_offset1 += columns1[i].col_len;
-    }
-
-    int join_offset2 = DELETE_FLAG_SIZE;
-    for (int i = 0; i < tpd2->num_columns; i++) {
-        if (strcmp(columns2[i].col_name, join_col2) == 0) {
-            break;
-        }
-        join_offset2 += columns2[i].col_len;
-    }
 
     for (int i = 0; i < header1.num_records; i++) {
         fseek(file1, header1.record_offset + i * header1.record_size, SEEK_SET);
@@ -1726,154 +1755,160 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                 memcpy(combined_row, record1, header1.record_size);
                 memcpy(combined_row + header1.record_size, record2, header2.record_size);
 
-                // Create combined column metadata
-                cd_entry combined_columns[MAX_NUM_COL];
-                int combined_num_columns = 0;
-
-                // Add columns from table1
-                for (int i = 0; i < tpd1->num_columns; i++) {
-                    combined_columns[combined_num_columns++] = columns1[i];
-                }
-
-                // Add columns from table2
-                for (int i = 0; i < tpd2->num_columns; i++) {
-                    combined_columns[combined_num_columns++] = columns2[i];
-                }
-
-                // Evaluate additional conditions
+                // Evaluate conditions
                 if (evaluate_conditions_join(combined_row,
-                                                columns1, tpd1->num_columns,header1.record_size,
-                                                columns2, tpd2->num_columns,header2.record_size,
-                                                conditions, num_conditions, logical_operators)){
-                    // Print selected columns for joined rows
-                    for (int k = 0; k < num_validated_columns; k++) {
-                        if (strcmp(validated_columns[k].table_name, table_name1) == 0) {
-                            // Locate the column in the schema of table1
-                            for (int i = 0; i < tpd1->num_columns; i++) {
-                                if (strcmp(columns1[i].col_name, validated_columns[k].column_name) == 0) {
-                                    int col_offset = DELETE_FLAG_SIZE; // Start after delete flag
-                                    for (int j = 0; j < i; j++) {
-                                        col_offset += columns1[j].col_len; // Accumulate offsets
-                                    }
-
-                                    // Print the column value based on its type
-                                    if (columns1[i].col_type == T_INT) {
-                                        printf("%-30d | ", *(int *)(record1 + col_offset));
-                                    } else if (columns1[i].col_type == T_CHAR) {
-                                        printf("%-30.*s | ", columns1[i].col_len, record1 + col_offset);
-                                    }
-                                    break;
-                                }
-                            }
-                        } else if (strcmp(validated_columns[k].table_name, table_name2) == 0) {
-                            // Locate the column in the schema of table2
-                            for (int i = 0; i < tpd2->num_columns; i++) {
-                                if (strcmp(columns2[i].col_name, validated_columns[k].column_name) == 0) {
-                                    int col_offset = DELETE_FLAG_SIZE; // Start after delete flag
-                                    for (int j = 0; j < i; j++) {
-                                        col_offset += columns2[j].col_len; // Accumulate offsets
-                                    }
-
-                                    // Print the column value based on its type
-                                    if (columns2[i].col_type == T_INT) {
-                                        printf("%-30d | ", *(int *)(record2 + col_offset));
-                                    } else if (columns2[i].col_type == T_CHAR) {
-                                        printf("%-30.*s | ", columns2[i].col_len, record2 + col_offset);
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    printf("\n");
-
+                                             columns1, tpd1->num_columns, header1.record_size,
+                                             columns2, tpd2->num_columns, header2.record_size,
+                                             conditions, num_conditions, logical_operators)) {
+                    result_rows[result_count++] = combined_row;
+                } else {
+                    free(combined_row);
                 }
-
-                free(combined_row);
             }
         }
     }
 
-    // Free resources
+    // Sort rows if ORDER BY is specified
+    if (strcmp(order_by_col,"")!=0 && result_count > 1) {
+        int order_by_offset = calculate_column_offset_from_mapping(order_by_col,
+                                                                    validated_columns,
+                                                                    num_validated_columns,
+                                                                    columns1,
+                                                                    tpd1->num_columns);
+        int order_by_type = determine_column_type(order_by_col,
+                                                    validated_columns,
+                                                    num_validated_columns,
+                                                    columns1,
+                                                    tpd1->num_columns,
+                                                    columns2,
+                                                    tpd2->num_columns);
+        quick_sort_rows(result_rows, 0, result_count - 1, order_by_offset, order_by_type, desc);
+    }
+
+    // Print results
+    for (int i = 0; i < num_validated_columns; i++) {
+        printf("%-30s | ", validated_columns[i].column_name);
+    }
+    printf("\n");
+    for (int i = 0; i < num_validated_columns; i++) {
+        printf("-------------------------------+ ");
+    }
+    printf("\n");
+
+    for (int i = 0; i < result_count; i++) {
+        char *row = result_rows[i]; // Current row pointer
+
+        // Iterate over the validated columns to print the values
+        for (int j = 0; j < num_validated_columns; j++) {
+            const char *table_name = validated_columns[j].table_name;
+            const char *column_name = validated_columns[j].column_name;
+
+            // Determine which table the column belongs to and compute the offset
+            int offset = DELETE_FLAG_SIZE;
+            cd_entry *columns = NULL;
+            int num_columns = 0;
+
+            if (strcmp(table_name, table_name1) == 0) {
+                columns = columns1; // Pass the correct pointer to columns1
+                num_columns = tpd1->num_columns;
+            } else if (strcmp(table_name, table_name2) == 0) {
+                columns = columns2; // Pass the correct pointer to columns2
+                num_columns = tpd2->num_columns;
+                offset += header1.record_size;
+            }
+
+            int matching_col_index = -1; // To store the index of the matching column
+            for (int k = 0; k < num_columns; k++) {
+                // printf("\nComparing column '%s' with '%s'\n", columns[k].col_name, column_name); // Debug
+                if (strcmp(columns[k].col_name, column_name) == 0) {
+                    matching_col_index = k; // Store the index of the matching column
+                    // printf("Matched column '%s' at index %d\n", column_name, k); // Debug
+                    break;
+                }
+                // printf("Offset before adding: %d\n", offset); // Debug
+                offset += columns[k].col_len; // Accumulate offset for each column
+                // printf("Offset after adding: %d\n", offset); // Debug
+            }
+
+            // Check if a matching column was found
+            if (matching_col_index != -1) {
+                // printf("Final offset for column '%s': %d\n", column_name, offset); // Debug
+                if (columns[matching_col_index].col_type == T_INT) {
+                    printf("%-30d | ", *(int *)(row + offset));
+                } else if (columns[matching_col_index].col_type == T_CHAR) {
+                    printf("%-30.*s | ", columns[matching_col_index].col_len, row + offset);
+                }
+            } else {
+                printf("Error: Column '%s' not found.\n", column_name);
+            }
+        }
+        printf("\n"); // Print a new line after each row
+
+        // Free the memory allocated for this row
+        free(row);
+    }
+
+    free(result_rows);
+
     free(record1);
     free(record2);
     fclose(file1);
     fclose(file2);
 }
 
-
-table_data *fetch_records(const char *table_name, const char **column_list, int num_columns, query_condition *conditions, int num_conditions, char *logical_operators) {
-    // Open table file
-	int rc;
-    char filename[MAX_IDENT_LEN + 5];
-    sprintf(filename, "%s.tab", table_name);
-
-    FILE *file = fopen(filename, "rb");
-    if (!file) {
-        fprintf(stderr, "Error: Could not open file %s\n", filename);
-        return NULL;
-    }
-
-    table_file_header header;
-    fread(&header, sizeof(table_file_header), 1, file);
-
-	tpd_entry *tpd;
-	tpd = get_tpd_from_list((char *)table_name);
-	if(!tpd){
-		printf("Error: Table %s does not exist.\n", table_name);
-		rc = TABLE_NOT_EXIST;
-		// TODO: Manage how to return table not found error
-	}
-
-    // cd_entry *columns = (cd_entry *)((char *)header.tpd_ptr + header.tpd_ptr->cd_offset);
-	cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
-
-    // Prepare data structure for the results
-    table_data *data = (table_data *)malloc(sizeof(table_data));
-    data->num_rows = 0;
-    data->num_columns = num_columns;
-    data->data = (char **)malloc(header.num_records * sizeof(char *));
-
-    char *record = (char *)malloc(header.record_size);
-
-    for (int i = 0; i < header.num_records; i++) {
-        fseek(file, sizeof(table_file_header) + i * header.record_size, SEEK_SET);
-        fread(record, header.record_size, 1, file);
-
-        if (record[0] == 1) { // Skip deleted rows
-            continue;
+int calculate_column_offset(const char *col_name, cd_entry *columns, int num_columns) {
+    int offset = DELETE_FLAG_SIZE; // Start after the delete flag
+    for (int i = 0; i < num_columns; i++) {
+        if (strcmp(columns[i].col_name, col_name) == 0) {
+            return offset;
         }
+        offset += columns[i].col_len; // Accumulate offsets
+    }
+    return -1; // Column not found
+}
 
-        if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
-			int row_size = DELETE_FLAG_SIZE;
-            for (int j = 0; j < num_columns; j++) {
-                row_size += columns[j].col_len;
+int calculate_column_offset_from_mapping(const char *col_name, column_mapping *columns, int num_columns, cd_entry *schema, int schema_columns) {
+    int offset = DELETE_FLAG_SIZE; // Start after the delete flag
+    for (int i = 0; i < num_columns; i++) {
+        if (strcmp(columns[i].column_name, col_name) == 0) {
+            // Find the column in the schema to get its length
+            for (int j = 0; j < schema_columns; j++) {
+                if (strcmp(schema[j].col_name, col_name) == 0) {
+                    return offset;
+                }
+                offset += schema[j].col_len; // Add the length of this column to the offset
             }
-			data->data[data->num_rows] = (char *)malloc(row_size);
-			if (!data->data[data->num_rows]) {
-				fprintf(stderr, "Error: Memory allocation failed for row %d.\n", data->num_rows);
-				exit(EXIT_FAILURE);
-			}
+            break; // Column found in mapping
+        }
+    }
+    return -1; // Column not found
+}
 
-			int col_offset = DELETE_FLAG_SIZE;
-            for (int j = 0; j < num_columns; j++) {
-                strncpy(data->data[data->num_rows] + (j * MAX_TOK_LEN), record + col_offset, columns[j].col_len);
-                col_offset += columns[j].col_len;
-
-                // Null terminate strings
-                if (columns[j].col_type == T_CHAR || columns[j].col_type == T_VARCHAR) {
-                    data->data[data->num_rows][(j + 1) * MAX_TOK_LEN - 1] = '\0';
+int determine_column_type(const char *col_name, column_mapping *validated_columns, int num_validated_columns, 
+                          cd_entry *columns1, int num_columns1, cd_entry *columns2, int num_columns2) {
+    // Iterate over validated columns to find the target column
+    for (int i = 0; i < num_validated_columns; i++) {
+        if (strcmp(validated_columns[i].column_name, col_name) == 0) {
+            // Check which table the column belongs to and find its type
+            if (strcmp(validated_columns[i].table_name, "table1") == 0) { // Replace with actual table name if known
+                for (int j = 0; j < num_columns1; j++) {
+                    if (strcmp(columns1[j].col_name, col_name) == 0) {
+                        return columns1[j].col_type;
+                    }
+                }
+            } else if (strcmp(validated_columns[i].table_name, "table2") == 0) { // Replace with actual table name if known
+                for (int j = 0; j < num_columns2; j++) {
+                    if (strcmp(columns2[j].col_name, col_name) == 0) {
+                        return columns2[j].col_type;
+                    }
                 }
             }
-
-            data->num_rows++;
         }
     }
-
-    free(record);
-    fclose(file);
-    return data;
+    fprintf(stderr, "Error: Column '%s' not found in validated columns.\n", col_name);
+    return -1; // Return error code if column not found
 }
+
 
 void mark_row_deleted(FILE *file, int row_index, int record_size) {
     fseek(file, sizeof(table_file_header) + row_index * record_size, SEEK_SET);

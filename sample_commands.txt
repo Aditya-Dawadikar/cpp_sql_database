@@ -27,6 +27,7 @@ Sample Select Queries
 ./db "select * from department"
 ./db "select dept_id, dept_name from department"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"
+./db "select dept_name, emp_id, f_name, l_name from department natural join employee on dept_id = dept"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where dept='2001'"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where emp_id=1001"
 ./db "select * from employee natural join department on dept = dept_id"
