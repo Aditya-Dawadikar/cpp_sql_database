@@ -1274,6 +1274,10 @@ int sem_select_query_handler(token_list *tok_list) {
     char logical_operators[MAX_NUM_CONDITIONS];
     memset(logical_operators, 'A', sizeof(logical_operators)); // Default to AND
 
+    // Variables for aggregate function
+    char aggregate_function[MAX_IDENT_LEN] = {0};
+    char aggregate_column[MAX_IDENT_LEN] = {0};
+
     if (is_inner_join_query(tok_list)) {
         token_list *on_clause_tokens = extract_on_clause(tok_list); // Extract ON clause tokens
         parse_inner_join_query(tok_list, table_name1, table_name2, column_list, &num_columns, conditions, &num_conditions, logical_operators);
@@ -1304,7 +1308,15 @@ int sem_select_query_handler(token_list *tok_list) {
         handle_select_all(table_name1, conditions, num_conditions, logical_operators, order_by_col, desc);
 
     } else {
-        parse_select_columns_query(tok_list, table_name1, column_list, &num_columns, conditions, &num_conditions, logical_operators);
+        parse_select_columns_query(tok_list,
+                                    table_name1,
+                                    column_list,
+                                    &num_columns,
+                                    conditions,
+                                    &num_conditions,
+                                    logical_operators, 
+                                    aggregate_function,
+                                    aggregate_column);
 
         // Extract ORDER BY parameters
         char order_by_col[MAX_IDENT_LEN] = {0};
@@ -1312,7 +1324,16 @@ int sem_select_query_handler(token_list *tok_list) {
         parse_order_by_clause(tok_list, order_by_col, &desc);
 
         // Call handle_select_columns with ORDER BY parameters
-        handle_select_columns(table_name1, column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+        handle_select_columns(table_name1,
+                                column_list,
+                                num_columns,
+                                conditions,
+                                num_conditions,
+                                logical_operators,
+                                aggregate_function,
+                                aggregate_column,
+                                order_by_col,
+                                desc);
 
     }
 
@@ -1347,16 +1368,50 @@ void parse_select_all_query(token_list *tok_list, char *table_name, query_condit
     }
 }
 
-void parse_select_columns_query(token_list *tok_list, char *table_name, char **column_list, int *num_columns, query_condition *conditions, int *num_conditions, char *logical_operators) {
+void parse_select_columns_query(token_list *tok_list,
+                                char *table_name,
+                                char **column_list,
+                                int *num_columns,
+                                query_condition *conditions,
+                                int *num_conditions,
+                                char *logical_operators,
+                                char *aggregate_function,
+                                char *aggregate_column) {
     token_list *cur = tok_list;
 
-    // Parse column list
-    while (cur && cur->tok_value != K_FROM) {
-        if (cur->tok_class == identifier) {
-            column_list[(*num_columns)++] = strdup(cur->tok_string);
+    // Parse columns or aggregate functions
+    if (cur->tok_value == F_COUNT || cur->tok_value == F_SUM || cur->tok_value == F_AVG) {
+        strncpy(aggregate_function, cur->tok_string, MAX_IDENT_LEN);
+        cur = cur->next;
+
+        if (cur == NULL || cur->tok_value != S_LEFT_PAREN) {
+            fprintf(stderr, "Error: Expected '(' after aggregate function.\n");
+            return;
         }
         cur = cur->next;
-    }
+
+        if (cur == NULL || cur->tok_class != identifier) {
+            fprintf(stderr, "Error: Expected column name inside aggregate function.\n");
+            return;
+        }
+        strncpy(aggregate_column, cur->tok_string, MAX_IDENT_LEN);
+        cur = cur->next;
+
+        if (cur == NULL || cur->tok_value != S_RIGHT_PAREN) {
+            fprintf(stderr, "Error: Expected ')' after column name.\n");
+            return;
+        }
+        cur = cur->next;
+    }else{
+        // Parse column list
+        while (cur && cur->tok_value != K_FROM) {
+            if (cur->tok_class == identifier) {
+                column_list[(*num_columns)++] = strdup(cur->tok_string);
+            }
+            cur = cur->next;
+        }
+    } 
+
     if (!cur || cur->tok_value != K_FROM) {
         fprintf(stderr, "Error: Missing FROM clause.\n");
         return;
@@ -1525,6 +1580,8 @@ void handle_select_columns(const char *table_name,
                             query_condition *conditions,
                             int num_conditions,
                             char *logical_operators,
+                            const char *aggregate_function,
+                            const char *aggregate_column,
                             const char *order_by_col,
                             bool desc) {
     // Fetch table metadata
@@ -1552,7 +1609,26 @@ void handle_select_columns(const char *table_name,
     }
 
     // Call fetch_and_print_records with the specific columns
-    fetch_and_print_records(table_name, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+    // fetch_and_print_records(table_name, (const char **)column_list, num_columns, conditions, num_conditions, logical_operators, order_by_col, desc);
+
+    if (aggregate_function[0] != '\0') { // If aggregate function is present
+        fetch_and_compute_aggregate(table_name,
+                                    aggregate_function,
+                                    aggregate_column,
+                                    conditions,
+                                    num_conditions,
+                                    logical_operators);
+    } else {
+        fetch_and_print_records(table_name,
+                                (const char **)column_list,
+                                num_columns,
+                                conditions,
+                                num_conditions,
+                                logical_operators,
+                                order_by_col,
+                                desc);
+    }
+
 }
 
 void handle_select_inner_join(const char *table_name1, const char *table_name2, char **column_list, int num_columns,
@@ -2754,4 +2830,85 @@ int partition_rows(char **rows, int low, int high, int column_offset, int column
     rows[high] = temp;
 
     return i + 1;
+}
+
+void fetch_and_compute_aggregate(const char *table_name, const char *aggregate_function, const char *aggregate_column,
+                                  query_condition *conditions, int num_conditions, char *logical_operators) {
+    char filename[MAX_IDENT_LEN + 5];
+    sprintf(filename, "%s.tab", table_name);
+
+    FILE *file = fopen(filename, "rb");
+    if (!file) {
+        fprintf(stderr, "Error: Could not open file %s.\n", filename);
+        return;
+    }
+
+    table_file_header header;
+    fread(&header, sizeof(table_file_header), 1, file);
+
+    tpd_entry *tpd = get_tpd_from_list((char *)table_name);
+    if (!tpd) {
+        fprintf(stderr, "Error: Table '%s' not found.\n", table_name);
+        fclose(file);
+        return;
+    }
+
+    cd_entry *columns = (cd_entry *)((char *)tpd + tpd->cd_offset);
+
+    // Locate the aggregate column
+    int aggregate_offset = DELETE_FLAG_SIZE;
+    int aggregate_type = -1;
+    for (int i = 0; i < tpd->num_columns; i++) {
+        if (strcmp(columns[i].col_name, aggregate_column) == 0) {
+            aggregate_type = columns[i].col_type;
+            break;
+        }
+        aggregate_offset += columns[i].col_len;
+    }
+
+    if (aggregate_type == -1) {
+        fprintf(stderr, "Error: Column '%s' not found in table '%s'.\n", aggregate_column, table_name);
+        fclose(file);
+        return;
+    }
+
+    // Compute aggregate
+    int count = 0;
+    double sum = 0.0;
+
+    char *record = (char *)malloc(header.record_size);
+    for (int i = 0; i < header.num_records; i++) {
+        fseek(file, header.record_offset + i * header.record_size, SEEK_SET);
+        fread(record, header.record_size, 1, file);
+
+        if (record[0] == 1) { // Skip deleted rows
+            continue;
+        }
+
+        if (evaluate_conditions(record + DELETE_FLAG_SIZE, columns, conditions, num_conditions, logical_operators)) {
+            count++;
+            if (aggregate_type == T_INT) {
+                sum += *(int *)(record + aggregate_offset);
+            } else if (aggregate_type == T_CHAR) {
+                fprintf(stderr, "Error: Aggregate operations not supported on CHAR columns.\n");
+                free(record);
+                fclose(file);
+                return;
+            }
+        }
+    }
+
+    // Print results
+    printf("\n%-30s | %-30s\n", "AGGREGATE FUNCTION", "RESULT");
+    printf("-------------------------------+-------------------------------\n");
+    if (strcasecmp(aggregate_function, "COUNT") == 0) {
+        printf("%-30s | %-30d\n", "COUNT", count);
+    } else if (strcasecmp(aggregate_function, "SUM") == 0) {
+        printf("%-30s | %-30.2f\n", "SUM", sum);
+    } else if (strcasecmp(aggregate_function, "AVG") == 0) {
+        printf("%-30s | %-30.2f\n", "AVG", (count > 0) ? sum / count : 0.0);
+    }
+
+    free(record);
+    fclose(file);
 }

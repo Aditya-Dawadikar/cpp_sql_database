@@ -271,7 +271,9 @@ void parse_select_columns_query(token_list *tok_list,
 								int *num_columns,
 								query_condition *conditions,
 								int *num_conditions,
-								char *logical_operators);
+								char *logical_operators,
+                                char *aggregate_function,
+                                char *aggregate_column);
 void parse_inner_join_query(token_list *tok_list,
 							char *table_name1,
 							char *table_name2,
@@ -292,6 +294,8 @@ void handle_select_columns(const char *table_name,
 							query_condition *conditions,
 							int num_conditions,
 							char *logical_operators,
+							const char *aggregate_function,
+							const char *aggregate_column,
 							const char *order_by_col,
 							bool desc);
 void handle_select_inner_join(const char *table_name1,
@@ -376,6 +380,12 @@ int determine_column_type(const char *col_name, column_mapping *validated_column
                           const char *table_name1, const char *table_name2);
 bool column_in_list(const char *column_name, column_mapping *validated_columns, int num_validated_columns);
 bool column_exists_in_table(const char *column_name, const char *table_name);
+void fetch_and_compute_aggregate(const char *table_name,
+									const char *aggregate_function,
+									const char *aggregate_column,
+                                	query_condition *conditions,
+									int num_conditions,
+									char *logical_operators);
 /*
 	Keep a global list of tpd - in real life, this will be stored
 	in shared memory.  Build a set of functions/methods around this.
