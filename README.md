@@ -1,4 +1,4 @@
-# C++ SQL Engine
+# A Simple SQL Engine built with C++ 🚀
 
 ### Introduction
 This project is a lightweight, terminal-based relational database management system (RDBMS) implemented in C++. Designed for simplicity and extensibility, the system supports essential database operations such as creating tables, inserting, updating, and deleting records, and executing queries with filtering, aggregation, and sorting. It includes support for natural joins, aggregate functions like `COUNT`, `SUM`, and `AVG`, and conditional queries with logical operators like `AND` and `OR`. The project demonstrates foundational database functionalities, providing a simple yet powerful tool for managing and querying relational data directly from the command line. This RDBMS is perfect for educational purposes, experimentation, and exploring the inner workings of database systems.
@@ -19,9 +19,36 @@ The database employs an efficient mechanism for managing inserts by reusing spac
 
 If no deleted rows are found, the new record is appended to the end of the file. By prioritizing previously deleted rows, the database ensures efficient use of disk space, maintains a compact file structure, and improves performance during sequential file scans. This design helps balance resource utilization while keeping the operations fast and reliable.
 
+### Database File Structure 📁
+
+The database system uses two primary file types for storage:
+
+#### 1. **Schema File (`dbfile.bin`)**
+- The `dbfile.bin` file serves as the master schema repository for the database. It contains metadata about all registered tables, including:
+  - Table names.
+  - Column definitions (e.g., column names, data types, sizes, constraints).
+  - The number of columns in each table.
+- This file is critical for query execution as it allows the system to validate table existence and column definitions during query parsing and execution.
+- When a new table is created, its schema is appended to `dbfile.bin`. Similarly, when a table is dropped, its schema is removed from this file.
+
+#### 2. **Table Data Files (`<tablename>.tab`)**
+- Each table in the database has a corresponding `.tab` file that contains the actual data stored in a binary format.
+- The structure of a `.tab` file includes:
+  - A **table header**, which stores metadata such as the record size, number of records, and a pointer to the start of the data section.
+  - **Data rows**, which contain the actual values for each column in a row. Rows are stored in sequential order.
+  - A **deleted flag** for each row, marking whether the row is active or deleted. Deleted rows are reused for new inserts to optimize storage.
+- The `.tab` file is accessed and updated directly during insert, update, delete, and query operations.
+
+#### Interaction Between the Files
+- During query execution:
+  - The system first reads `dbfile.bin` to fetch the table schema.
+  - It then accesses the corresponding `.tab` file to perform operations on the actual data, such as reading rows, inserting new records, or calculating aggregates.
+
+This two-tiered file structure ensures a clear separation of schema and data, making the database more maintainable and efficient. The schema in `dbfile.bin` provides a centralized reference for metadata, while the `.tab` files focus solely on storing and managing table-specific data.
+
 ---
 
-### Setup Steps
+### Setup Steps 🛠️
 
 Follow these steps to set up the GCC environment inside a Docker container and compile the project:
 
@@ -110,7 +137,7 @@ bash
 ```bash
 docker start "your-container-name-here"
 ```
-You’re now ready to test and debug your database project within the Docker container!
+You’re now ready to test and debug your database project within the Docker container! 🚀🚀🚀
 
 ---
 
@@ -142,7 +169,7 @@ Retrieve schema details for a specific table:
 
 --- 
 
-## Demo Queries
+## Demo Queries 📺
 #### Let us create a table Employee and insert some data
 ![img](https://github.com/Aditya-Dawadikar/cpp_sql_database/blob/main/views/create_01.png)
 
