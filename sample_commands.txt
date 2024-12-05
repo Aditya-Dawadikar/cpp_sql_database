@@ -23,30 +23,30 @@ Insert into Department Table
 
 Sample Select Queries
 ./db "select * from employee"
-./db "select emp_id, f_name, l_name, dept from employee"
 ./db "select * from department"
+./db "select emp_id, f_name, l_name, dept from employee"
 ./db "select dept_id, dept_name from department"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"
-./db "select dept_name, emp_id, f_name, l_name from department natural join employee on dept_id = dept"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where dept='2001'"
-./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where emp_id=1001"
 ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where dept='2002' order by emp_id"
 ./db "select * from employee natural join department on dept = dept_id"
 ./db "select * from employee natural join department on dept = dept_id where dept_name='GCP'"
 ./db "select * from employee natural join department on dept = dept_id where dept_id='2002'"
 ./db "select * from employee natural join department on dept = dept_id order by emp_id"
 ./db "select * from employee natural join department on dept = dept_id order by emp_id where dept_name='GCP'"
-
+./db "select * from employee where emp_id=1001 or l_name='Munshi'"
 ./db "select count(emp_id) from employee"
 ./db "select sum(emp_id) from employee"
 ./db "select avg(emp_id) from employee"
 ./db "select count(emp_id) from employee where dept='2002'"
-
 ./db "select count(emp_id) from employee natural join department on dept = dept_id"
-./db "select count(emp_id) from employee natural join department on dept = dept_id where dept_name='GCP' order by emp_id"
+./db "select count(emp_id) from employee natural join department on dept = dept_id where dept_name='GCP'"
 
+Delete Query
 ./db "delete from employee where emp_id=1001"
-./db "select * from employee where emp_id=1001 or l_name='Munshi'"
+
+Update Query
+./db "update employee set emp_id=3001 where emp_id=1001"
 
 Other commands
 ./db "drop table course"

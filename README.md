@@ -1,250 +1,113 @@
-# C++ SQL Database
+## Supported Queries and Commands
 
-Refer `sample_commands.txt` for build and test commands.
-
-## Example Output
-### Create Table
-
-#### Syntax
-`CREATE TABLE <table_name>(<col_1_name> <col_1_type>, <col_2_name> <col_2_type>, ...)`
-#### Input Query
-`./db "create table course(id int, name varchar(10), total_credits int)"`
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "create table course(id int, name varchar(10), total_credits int)"
-
-CREATE TABLE statement
-
+### **1. Create Tables**
+Create tables with specified schema:
+```bash
+./db "create table employee (emp_id int NOT NULL, f_name char(20), l_name char(20), dept char(20))"
+./db "create table department (dept_id char(20) NOT NULL, dept_name char(20))"
 ```
 
-***
+---
 
-### List Tables
+### **2. Insert Data**
+Insert records into tables:
+```bash
+./db "insert into employee values (1001, 'Aditya', 'Dawadikar', '2001')"
+./db "insert into employee values (1002, 'Rudraksh', 'Naik', '2001')"
+./db "insert into employee values (1003, 'Shubhankar', 'Munshi', '2002')"
+./db "insert into employee values (1004, 'Mandar', 'Gondane', '2002')"
 
-#### Syntax
-`LIST TABLE`
-
-#### Input Query
-`./db "list table"`
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "list table"
-
-LIST TABLE statement
-
-Table List
-*****************
-student
-employee
-department
-course
-****** End ******
+./db "insert into department values ('2001', 'AWS')"
+./db "insert into department values ('2002', 'GCP')"
 ```
 
-***
+---
 
-### List Table Schema
+### **3. Select Queries**
 
-#### Syntax
-`LIST SCHEMA FOR <table_name>`
-
-#### Input Query
-`./db "list schema for student"`
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "list schema for student"
-
-LIST SCHEMA statement
-Table PD size            (tpd_size)    = 180
-Table Name               (table_name)  = student
-Number of Columns        (num_columns) = 4
-Column Descriptor Offset (cd_offset)   = 36
-Table PD Flags           (tpd_flags)   = 0
-
-Column Name   (col_name) = id
-Column Id     (col_id)   = 0
-Column Type   (col_type) = 10
-Column Length (col_len)  = 4
-Not Null flag (not_null) = 0
-
-Column Name   (col_name) = first
-Column Id     (col_id)   = 1
-Column Type   (col_type) = 12
-Column Length (col_len)  = 10
-Not Null flag (not_null) = 0
-
-Column Name   (col_name) = last
-Column Id     (col_id)   = 2
-Column Type   (col_type) = 12
-Column Length (col_len)  = 10
-Not Null flag (not_null) = 0
-
-Column Name   (col_name) = age
-Column Id     (col_id)   = 3
-Column Type   (col_type) = 10
-Column Length (col_len)  = 4
-Not Null flag (not_null) = 0
+#### **Basic Select**
+Retrieve all or specific columns from a table:
+```bash
+./db "select * from employee"
+./db "select * from department"
+./db "select emp_id, f_name, l_name, dept from employee"
+./db "select dept_id, dept_name from department"
 ```
 
-***
-
-### Drop Table
-
-#### Syntax
-`DROP TABLE <table_name>`
-
-#### Input Query
-`./db "drop table course"`
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "drop table course"
-
-DROP TABLE statement
+#### **Natural Join**
+Perform natural joins between tables:
+```bash
+./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"
+./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where dept='2001'"
+./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id where dept='2002' order by emp_id"
+./db "select * from employee natural join department on dept = dept_id"
+./db "select * from employee natural join department on dept = dept_id where dept_name='GCP'"
+./db "select * from employee natural join department on dept = dept_id where dept_id='2002'"
+./db "select * from employee natural join department on dept = dept_id order by emp_id"
+./db "select * from employee natural join department on dept = dept_id order by emp_id where dept_name='GCP'"
 ```
 
-***
-
-### Insert Query
-
-#### Syntax
-`INSERT INTO <table_name> VALUES ( <col_1_val>, <col_2_val>, ...)`
-
-#### Input Query 1
-`./db "insert into employee values (1001, 'Aditya', 'Dawadikar', 2001)"`
-
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "insert into employee values (1001, 'Aditya', 'Dawadikar', 2001)"
-
-INSERT ROW statement
-emp_id: (int) 1001 
-f_name:  (char*) Aditya 
-l_name:  (char*) Dawadikar 
-dept: (int) 2001 
-Inserted 1 Row.
-
+#### **Conditional Select**
+Filter rows using WHERE conditions:
+```bash
+./db "select * from employee where emp_id=1001 or l_name='Munshi'"
 ```
 
-#### Input Query 2
-`./db "insert into department values (NULL, 'Nvidia')"`
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "insert into department values (NULL, 'Nvidia')"
+---
 
-INSERT ROW statement
-Error: Column 'dept_id' cannot be NULL.
-```
-
-#### Input Query 3
-`./db "insert into department values ('2004', NULL)"`
-#### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "insert into department values ('2004', NULL)"
-
-INSERT ROW statement
-dept_id: (char*) 2004
-(NULL char*) 
-Inserted 1 Row.
+### **4. Aggregate Functions**
+Perform aggregate operations like `COUNT`, `SUM`, and `AVG`:
+```bash
+./db "select count(emp_id) from employee"
+./db "select sum(emp_id) from employee"
+./db "select avg(emp_id) from employee"
+./db "select count(emp_id) from employee where dept='2002'"
+./db "select count(emp_id) from employee natural join department on dept = dept_id"
+./db "select count(emp_id) from employee natural join department on dept = dept_id where dept_name='GCP'"
 ```
 
+---
 
-***
+### **5. Modify Data**
 
-### Select Query
-
-#### Select All
-##### Syntax
-`SELECT * FROM <table_name>`
-
-##### Query
-`./db "select * from employee"`
-##### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "select * from employee"
-
-SELECT statement
---------------------------------------------------------------------------------------------
-| emp_id               | f_name               | l_name               | dept                 | 
---------------------------------------------------------------------------------------------
-| 1001                 | Aditya               | Dawadikar            | 2001                 | 
-| 1002                 | Rudraksh             | Naik                 | 2001                 | 
-| 1003                 | Shubhankar           | Munshi               | 2002                 | 
-| 1004                 | Mandar               | Gondane              | 2002                 | 
---------------------------------------------------------------------------------------------
+#### **Delete Records**
+Delete specific rows from a table:
+```bash
+./db "delete from employee where emp_id=1001"
 ```
 
-***
-
-#### Projection
-
-##### Syntax
-`SELECT <col_1_name>, <col_2_name>, ... FROM <table_name>`
-##### Query
-`./db "select emp_id, f_name, l_name, dept from employee"`
-##### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "select emp_id, f_name, l_name, dept from employee"
-
-SELECT statement
---------------------------------------------------------------------------------------------
-| emp_id               | f_name               | l_name               | dept                 | 
---------------------------------------------------------------------------------------------
-| 1001                 | Aditya               | Dawadikar            | 2001                 | 
-| 1002                 | Rudraksh             | Naik                 | 2001                 | 
-| 1003                 | Shubhankar           | Munshi               | 2002                 | 
-| 1004                 | Mandar               | Gondane              | 2002                 | 
---------------------------------------------------------------------------------------------
+#### **Update Records**
+Update specific rows in a table:
+```bash
+./db "update employee set emp_id=3001 where emp_id=1001"
 ```
 
-***
+---
 
-#### Natural Join
+### **6. Utility Commands**
 
-##### Syntax
-```
-SELECT
-<table_1_col_1>, <table_1_col_2>,...,<table_2_col_1>,<table_2_col_2>,...
-FROM
-<table_1> NATURAL JOIN <table_2>
-ON
-<table_1_join_col> = <table_2_join_col>
+#### **Drop Table**
+Remove a table from the database:
+```bash
+./db "drop table course"
 ```
 
-##### Query
-`./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"`
-##### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "select emp_id, f_name, l_name, dept_name from employee natural join department on dept = dept_id"
-
-SELECT statement
---------------------------------------------------------------------------------------------
-| emp_id               | f_name               | l_name               | dept_name            | 
---------------------------------------------------------------------------------------------
-| 1001                 | Aditya               | Dawadikar            | AWS                  | 
-| 1002                 | Rudraksh             | Naik                 | AWS                  | 
-| 1003                 | Shubhankar           | Munshi               | GCP                  | 
-| 1004                 | Mandar               | Gondane              | GCP                  | 
---------------------------------------------------------------------------------------------
+#### **List Tables**
+List all tables in the database:
+```bash
+./db "list table"
 ```
 
-##### Query
-`./db "select * from employee natural join department on dept = dept_id"`
-##### Output
-```
-root@0ab80bc98dab:/usr/src/cpp_sql_database# ./db "select * from employee natural join department on dept=dept_id"
-
-SELECT statement
-
--------------------------------------------------------------------------------------------------------------------
-| emp_id               | f_name               | l_name               | dept_id              | dept_name            | 
--------------------------------------------------------------------------------------------------------------------
-| 1001                 | Aditya               | Dawadikar            | 2001                 | AWS                  | 
-| 1003                 | Shubhankar           | Munshi               | 2002                 | GCP                  | 
--------------------------------------------------------------------------------------------------------------------
+#### **List Schema**
+Retrieve schema details for a specific table:
+```bash
+./db "list schema for student"
 ```
 
-***
+--- 
 
-## TODOs and Limitations
-1. NATURAL JOIN does not automatically detect columns with same names.
-2. NATURAL JOIN does not support `table.column` notation for columns list. Eg: `SELECT employee.f_name, department.dept_id FROM employee natural join department on employee.dept = department.dept_id` is `INVALID`. Thus column names must be unique across the database, but no check is added to ensure uniqueness across database.
+### Notes:
+1. **Order By Support:** Sorting is supported in select queries (both basic and join) using the `ORDER BY` clause.
+2. **Aggregate Functions:** Supported aggregate functions include `COUNT`, `SUM`, and `AVG`.
+3. **Joins:** Natural joins are supported using the `NATURAL JOIN` clause with the `ON` condition.
+4. **Case Sensitivity:** Aggregate functions and keywords are case-insensitive.

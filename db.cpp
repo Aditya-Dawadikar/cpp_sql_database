@@ -1064,8 +1064,6 @@ int sem_insert_row(token_list *t_list) {
                 return TYPE_MISMATCH;
             }
             int value = atoi(cur->tok_string);
-            printf("Writing value: %d for column %s\n", value,
-                   columns[i].col_name);
 
             int offset = DELETE_FLAG_SIZE;  // Start after the delete flag
             for (int j = 0; j < i; j++) {
@@ -1075,7 +1073,6 @@ int sem_insert_row(token_list *t_list) {
 
             memcpy(record + offset, &value,
                    sizeof(int));  // Copy value to the calculated offset
-            printf("Value written at offset %d\n", offset);
         } else if (columns[i].col_type == T_CHAR) {
             // Parse string value
             if (cur->tok_value != STRING_LITERAL) {
@@ -2806,9 +2803,6 @@ int sem_update_row(token_list *t_list) {
                             column_name);
                     continue;  // Skip this update if column is not found
                 }
-
-                printf("Updating column '%s' in row %d with value: %s\n",
-                       column_name, i, update_values[j]);
 
                 // Perform the update based on column type
                 if (target_column->col_type == T_INT) {
