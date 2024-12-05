@@ -331,14 +331,6 @@ int evaluate_conditions_join(const char *record,
 							 cd_entry *columns1, int num_columns1, int record_size1,
                              cd_entry *columns2, int num_columns2, int record_size2,
                              query_condition *conditions, int num_conditions, char *logical_operators);
-char *merge_rows(const char *row1,
-                 const char *row2,
-                 const char **select_columns,
-                 int num_columns,
-                 cd_entry *columns1,
-                 int num_columns1,
-                 cd_entry *columns2,
-                 int num_columns2);
 void parse_on_clause(token_list *tok_list,
 						char *join_col1,
 						char *join_col2);

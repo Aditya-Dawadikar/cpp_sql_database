@@ -2514,61 +2514,6 @@ int evaluate_conditions_join(const char *record,
     return result;
 }
 
-
-char *merge_rows(const char *row1,
-					const char *row2,
-					const char **select_columns,
-					int num_columns,
-					cd_entry *columns1,
-					int num_columns1,
-					cd_entry *columns2,
-					int num_columns2) {
-    // Allocate memory for the merged row
-    char *merged_row = (char *)malloc(num_columns * MAX_TOK_LEN);
-    if (!merged_row) {
-        fprintf(stderr, "Error: Memory allocation failed for merged row.\n");
-        return NULL;
-    }
-
-    for (int i = 0; i < num_columns; i++) {
-        const char *col_name = select_columns[i];
-        const char *value = NULL;
-
-        // Check if the column is in table1
-        int offset = 0;
-        for (int j = 0; j < num_columns1; j++) {
-            if (strcmp(columns1[j].col_name, col_name) == 0) {
-                value = row1 + offset;
-                strncpy(merged_row + i * MAX_TOK_LEN, value, columns1[j].col_len);
-                merged_row[i * MAX_TOK_LEN + columns1[j].col_len] = '\0'; // Null-terminate
-                break;
-            }
-            offset += columns1[j].col_len;
-        }
-
-        // If not found in table1, check table2
-        if (!value) {
-            offset = 0;
-            for (int j = 0; j < num_columns2; j++) {
-                if (strcmp(columns2[j].col_name, col_name) == 0) {
-                    value = row2 + offset;
-                    strncpy(merged_row + i * MAX_TOK_LEN, value, columns2[j].col_len);
-                    merged_row[i * MAX_TOK_LEN + columns2[j].col_len] = '\0'; // Null-terminate
-                    break;
-                }
-                offset += columns2[j].col_len;
-            }
-        }
-
-        // If column is not found in either table, fill with an empty string
-        if (!value) {
-            strncpy(merged_row + i * MAX_TOK_LEN, "", MAX_TOK_LEN);
-        }
-    }
-
-    return merged_row;
-}
-
 void parse_where_clause(token_list *tok_list, query_condition *conditions, int *num_conditions, char *logical_operators) {
     token_list *cur = tok_list;
 
