@@ -1774,14 +1774,18 @@ void fetch_and_read_inner_join(const char *table_name1, const char *table_name2,
                                                                     validated_columns,
                                                                     num_validated_columns,
                                                                     columns1,
-                                                                    tpd1->num_columns);
+                                                                    tpd1->num_columns,
+                                                                    columns2,
+                                                                    tpd2->num_columns);
         int order_by_type = determine_column_type(order_by_col,
                                                     validated_columns,
                                                     num_validated_columns,
                                                     columns1,
                                                     tpd1->num_columns,
                                                     columns2,
-                                                    tpd2->num_columns);
+                                                    tpd2->num_columns,
+                                                    table_name1,
+                                                    table_name2);
         quick_sort_rows(result_rows, 0, result_count - 1, order_by_offset, order_by_type, desc);
     }
 
@@ -1867,36 +1871,54 @@ int calculate_column_offset(const char *col_name, cd_entry *columns, int num_col
     return -1; // Column not found
 }
 
-int calculate_column_offset_from_mapping(const char *col_name, column_mapping *columns, int num_columns, cd_entry *schema, int schema_columns) {
-    int offset = DELETE_FLAG_SIZE; // Start after the delete flag
-    for (int i = 0; i < num_columns; i++) {
-        if (strcmp(columns[i].column_name, col_name) == 0) {
-            // Find the column in the schema to get its length
-            for (int j = 0; j < schema_columns; j++) {
-                if (strcmp(schema[j].col_name, col_name) == 0) {
+int calculate_column_offset_from_mapping(const char *column_name, column_mapping *validated_columns,
+                                         int num_validated_columns, cd_entry *columns1, int num_columns1,
+                                         cd_entry *columns2, int num_columns2) {
+    for (int i = 0; i < num_validated_columns; i++) {
+        if (strcmp(validated_columns[i].column_name, column_name) == 0) {
+            // Determine which table the column belongs to
+            const char *table_name = validated_columns[i].table_name;
+            cd_entry *columns = NULL;
+            int num_columns = 0;
+
+            if (strcmp(table_name, validated_columns[i].table_name) == 0) {
+                columns = columns1;
+                num_columns = num_columns1;
+            } else {
+                columns = columns2;
+                num_columns = num_columns2;
+            }
+
+            // Calculate offset for the column within its table
+            int offset = DELETE_FLAG_SIZE;
+            for (int j = 0; j < num_columns; j++) {
+                if (strcmp(columns[j].col_name, column_name) == 0) {
                     return offset;
                 }
-                offset += schema[j].col_len; // Add the length of this column to the offset
+                offset += columns[j].col_len;
             }
-            break; // Column found in mapping
         }
     }
+
+    fprintf(stderr, "Error: Column '%s' not found in validated columns.\n", column_name);
     return -1; // Column not found
 }
 
+
 int determine_column_type(const char *col_name, column_mapping *validated_columns, int num_validated_columns, 
-                          cd_entry *columns1, int num_columns1, cd_entry *columns2, int num_columns2) {
+                          cd_entry *columns1, int num_columns1, cd_entry *columns2, int num_columns2,
+                          const char *table_name1, const char *table_name2) {
     // Iterate over validated columns to find the target column
     for (int i = 0; i < num_validated_columns; i++) {
         if (strcmp(validated_columns[i].column_name, col_name) == 0) {
             // Check which table the column belongs to and find its type
-            if (strcmp(validated_columns[i].table_name, "table1") == 0) { // Replace with actual table name if known
+            if (strcmp(validated_columns[i].table_name, table_name1) == 0) { // Replace with actual table name if known
                 for (int j = 0; j < num_columns1; j++) {
                     if (strcmp(columns1[j].col_name, col_name) == 0) {
                         return columns1[j].col_type;
                     }
                 }
-            } else if (strcmp(validated_columns[i].table_name, "table2") == 0) { // Replace with actual table name if known
+            } else if (strcmp(validated_columns[i].table_name, table_name2) == 0) { // Replace with actual table name if known
                 for (int j = 0; j < num_columns2; j++) {
                     if (strcmp(columns2[j].col_name, col_name) == 0) {
                         return columns2[j].col_type;

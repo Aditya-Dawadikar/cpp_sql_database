@@ -368,18 +368,12 @@ void parse_order_by_clause(token_list *tok_list, char *order_by_column, bool *is
 void quick_sort_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc);
 int partition_rows(char **rows, int low, int high, int column_offset, int column_type, bool desc);
 int calculate_column_offset(const char *col_name, cd_entry *columns, int num_columns);
-int calculate_column_offset_from_mapping(const char *col_name,
-											column_mapping *columns,
-											int num_columns,
-											cd_entry *schema,
-											int schema_columns);
-int determine_column_type(const char *col_name,
-							column_mapping *validated_columns,
-							int num_validated_columns, 
-                        	cd_entry *columns1,
-							int num_columns1,
-							cd_entry *columns2,
-							int num_columns2);
+int calculate_column_offset_from_mapping(const char *column_name, column_mapping *validated_columns,
+                                         int num_validated_columns, cd_entry *columns1, int num_columns1,
+                                         cd_entry *columns2, int num_columns2);
+int determine_column_type(const char *col_name, column_mapping *validated_columns, int num_validated_columns, 
+                          cd_entry *columns1, int num_columns1, cd_entry *columns2, int num_columns2,
+                          const char *table_name1, const char *table_name2);
 bool column_in_list(const char *column_name, column_mapping *validated_columns, int num_validated_columns);
 bool column_exists_in_table(const char *column_name, const char *table_name);
 /*
